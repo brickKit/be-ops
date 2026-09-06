@@ -29,6 +29,29 @@ func TestGen_每组件三样东西(t *testing.T) {
 	}
 }
 
+// ⚠️ 实测踩坑：GRANT ... ON TABLES 不会连带 BIGSERIAL 自增列背后的
+// SEQUENCE——PostgreSQL 里两者是独立的权限对象。mdm-customer 用真实
+// PostgreSQL 跑 Create 时报 "permission denied for sequence
+// customers_id_seq"，虽然 customers 表本身的 INSERT/SELECT 都已经
+// 授权过。ALTER DEFAULT PRIVILEGES 必须两条都给，只给 ON TABLES 那一条
+// 会让每一张用 BIGSERIAL/IDENTITY 主键的表都在这里踩坑——而这是全项目
+// 表设计规范的标准写法（§11.2.1），不是个例。
+func TestGen_序列也要授权不只是表(t *testing.T) {
+	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`ALTER DEFAULT PRIVILEGES IN SCHEMA erp_sales`,
+		`GRANT USAGE, SELECT ON SEQUENCES TO erp_sales_rw`,
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("产出里缺少 %q，完整产出：\n%s", want, sql)
+		}
+	}
+}
+
 func TestGen_组件角色之间互相看不见(t *testing.T) {
 	sql, _ := Gen([]Row{
 		{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"},

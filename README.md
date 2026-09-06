@@ -17,9 +17,11 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
 
-## 现状（阶段一 Task 8）
+## 现状（阶段一 Task 16）
 
 已实现 3 个：`registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）。均已用真实 `registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行）跑通，`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等。其余 7 个（`routes`/`features`/`shell-config`/`shell-env`/`shell-depends`/`permissions`/`data-scopes`）留待各自先决条件成熟（组件真正出现、路由/权限设计落地）时再实现。
+
+⚠️ **`v0.1.2` 修了一个真实数据踩出来的坑**：`dbscript.Gen()` 原来只对表做 `ALTER DEFAULT PRIVILEGES ... ON TABLES`，没管 `BIGSERIAL` 自增列背后的 SEQUENCE——PostgreSQL 里两者是独立的权限对象，只授权表会让每一张用自增主键的表（全项目标准写法，§11.2.1）第一次 `INSERT` 就报 `permission denied for sequence`。`mdm-customer` 真的跑 `Create` 才暴露，现在两条 `ALTER DEFAULT PRIVILEGES` 都会产出。
 
 ## 三条生成器铁律（写进实现与测试时必须守）
 

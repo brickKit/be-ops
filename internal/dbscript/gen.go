@@ -100,8 +100,14 @@ func Gen(rows []Row) (string, error) {
 		fmt.Fprintf(&b, "GRANT CREATE ON SCHEMA %s TO %s;\n", r.Schema, r.Role)
 		fmt.Fprintf(&b, "GRANT USAGE ON SCHEMA %s TO %s;\n", archive, r.Role)
 		fmt.Fprintf(&b, "GRANT CREATE ON SCHEMA %s TO %s;\n", archive, r.Role)
+		// ⚠️ 实测踩坑：GRANT ... ON TABLES 不连带 BIGSERIAL 自增列背后的
+		// SEQUENCE——两者是 PostgreSQL 里独立的权限对象。§11.2.1 的强制
+		// 字段规范里没有一张表不用自增主键，只给 ON TABLES 会让每个组件
+		// 第一次 INSERT 就报 "permission denied for sequence"。
 		fmt.Fprintf(&b, "ALTER DEFAULT PRIVILEGES IN SCHEMA %s\n  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s;\n", r.Schema, r.Role)
+		fmt.Fprintf(&b, "ALTER DEFAULT PRIVILEGES IN SCHEMA %s\n  GRANT USAGE, SELECT ON SEQUENCES TO %s;\n", r.Schema, r.Role)
 		fmt.Fprintf(&b, "ALTER DEFAULT PRIVILEGES IN SCHEMA %s\n  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %s;\n", archive, r.Role)
+		fmt.Fprintf(&b, "ALTER DEFAULT PRIVILEGES IN SCHEMA %s\n  GRANT USAGE, SELECT ON SEQUENCES TO %s;\n", archive, r.Role)
 		// 外壳登录角色才能 SET ROLE 成它（§13.3 铁律二）
 		fmt.Fprintf(&b, "GRANT %s TO %s;\n\n", r.Role, r.ShellLoginRole)
 	}
