@@ -25,6 +25,7 @@ dependencies:
       optional: true
   resources:
     - { kind: database, engine: postgresql }
+    - { kind: mq, engine: nats }
 deployment:
   labels:
     prometheus.io/scrape: "true"
@@ -61,8 +62,11 @@ data:
 	if s.AssemblyRole != "optional" || s.Shell != "go-core" {
 		t.Fatalf("assembly_role/shell 解析不对：%+v", s)
 	}
-	if !s.NeedsDatabase {
-		t.Fatal("应该识别出声明了 database 资源")
+	if !hasResource(s.Resources, "database", "postgresql") {
+		t.Fatalf("应该识别出声明了 database/postgresql 资源，实际：%+v", s.Resources)
+	}
+	if !hasResource(s.Resources, "mq", "nats") {
+		t.Fatalf("应该识别出声明了 mq/nats 资源，实际：%+v", s.Resources)
 	}
 	if len(s.Dependencies) != 2 {
 		t.Fatalf("期望 2 条依赖，得到 %d：%+v", len(s.Dependencies), s.Dependencies)
@@ -79,6 +83,15 @@ data:
 	if s.Labels["prometheus.io/scrape"] != "true" {
 		t.Fatalf("labels 解析不对：%+v", s.Labels)
 	}
+}
+
+func hasResource(resources []ResourceDep, kind, engine string) bool {
+	for _, r := range resources {
+		if r.Kind == kind && r.Engine == engine {
+			return true
+		}
+	}
+	return false
 }
 
 func TestLoad_目录为空返回空列表不报错(t *testing.T) {

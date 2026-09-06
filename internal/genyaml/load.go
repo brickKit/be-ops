@@ -18,7 +18,8 @@ type componentYAML struct {
 	Dependencies struct {
 		Components []dependencyEntry `yaml:"components"`
 		Resources  []struct {
-			Kind string `yaml:"kind"`
+			Kind   string `yaml:"kind"`
+			Engine string `yaml:"engine"`
 		} `yaml:"resources"`
 	} `yaml:"dependencies"`
 	Deployment struct {
@@ -143,9 +144,7 @@ func loadOne(dir string) (ComponentSpec, bool, error) {
 		}
 	}
 	for _, r := range comp.Dependencies.Resources {
-		if r.Kind == "database" {
-			spec.NeedsDatabase = true
-		}
+		spec.Resources = append(spec.Resources, ResourceDep{Kind: r.Kind, Engine: r.Engine})
 	}
 	return spec, true, nil
 }

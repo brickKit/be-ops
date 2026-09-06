@@ -118,12 +118,61 @@ func TestGen_local注释(t *testing.T) {
 // 所属外壳的那一条 PostgreSQL 资源条目下。
 func TestGen_声明数据库资源的组件自动挂上bindings(t *testing.T) {
 	s := spec("erp/sales", "1.0.0", "optional")
-	s.NeedsDatabase = true
+	s.Resources = []ResourceDep{{Kind: "database", Engine: "postgresql"}}
 	out, err := Gen([]ComponentSpec{s}, []string{"erp/sales"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out, "componentId: erp/sales") {
 		t.Errorf("声明了数据库资源却没有自动生成 bindings，产出：\n%s", out)
+	}
+}
+
+// ⚠️ 实测踩坑：对着真实的 mdm-customer 组件跑 be-ops gen 时发现，genyaml
+// 只自动生成过 database 的 bindings——mq/nats 那条资源依赖被漏掉了，
+// brickkit up 因此仍然报"resources 中未声明"。产出 2b 的要求是"声明了
+// 资源依赖的组件都要有 bindings"，不是"只有数据库"，这里补上非数据库
+// 资源的自动绑定。
+func TestGen_声明非数据库资源的组件也自动挂上bindings(t *testing.T) {
+	s := spec("mdm/customer", "1.0.0", "default")
+	s.Resources = []ResourceDep{
+		{Kind: "database", Engine: "postgresql"},
+		{Kind: "mq", Engine: "nats"},
+	}
+	out, err := Gen([]ComponentSpec{s}, []string{"mdm/customer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "kind: mq") || !strings.Contains(out, "engine: nats") {
+		t.Errorf("应该产出 mq/nats 资源条目，产出：\n%s", out)
+	}
+	// mq 条目下也要挂 componentId——不能只有 kind/engine 没有 bindings，
+	// 否则和产出 2b 要拦的问题一模一样，只是换了个资源种类
+	idx := strings.Index(out, "kind: mq")
+	if idx < 0 || !strings.Contains(out[idx:], "componentId: mdm/customer") {
+		t.Errorf("mq 资源条目下应该有 mdm/customer 的 binding，产出：\n%s", out)
+	}
+}
+
+// mq（以及未来任何非 database 资源）不像 PostgreSQL 那样每个外壳有不同
+// 登录凭据（决策 3 只对数据库成立），所以不该按 Shell 拆成多条资源
+// 条目——两个不同外壳的组件用同一个 mq 资源条目共享 bindings 即可。
+func TestGen_mq资源不按外壳拆分(t *testing.T) {
+	a := spec("mdm/customer", "1.0.0", "default")
+	a.Shell = "go-core"
+	a.Resources = []ResourceDep{{Kind: "mq", Engine: "nats"}}
+	b := spec("infra/print", "1.0.0", "default")
+	b.Shell = "py-render"
+	b.Resources = []ResourceDep{{Kind: "mq", Engine: "nats"}}
+
+	out, err := Gen([]ComponentSpec{a, b}, []string{"mdm/customer", "infra/print"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "kind: mq") != 1 {
+		t.Errorf("不同外壳的组件共用同一个 mq 资源条目，应该只出现一次 kind: mq，产出：\n%s", out)
+	}
+	if !strings.Contains(out, "componentId: mdm/customer") || !strings.Contains(out, "componentId: infra/print") {
+		t.Errorf("两个组件都应该出现在这唯一一条 mq 资源的 bindings 里，产出：\n%s", out)
 	}
 }

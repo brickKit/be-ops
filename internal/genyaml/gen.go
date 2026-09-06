@@ -14,6 +14,13 @@ type Dependency struct {
 	Optional bool
 }
 
+// ResourceDep 是 component.yaml 的 dependencies.resources 一条。Engine
+// 逐字参与匹配（设计书 §2.7.3.1），genyaml 原样保留、不做归一化。
+type ResourceDep struct {
+	Kind   string
+	Engine string
+}
+
 // ComponentSpec 是 component.yaml + assembly.yaml 合并后的视图——genyaml
 // 只关心生成 brickkit.yaml 需要的那些字段，不是两份 yaml 的完整镜像。
 type ComponentSpec struct {
@@ -27,9 +34,9 @@ type ComponentSpec struct {
 	AssemblyRole string
 	SlotName     string // 仅 AssemblyRole == "slot" 时有意义
 
-	Shell string // 合并部署时进哪个外壳（决定 bindings 挂在哪条资源条目下）
+	Shell string // 合并部署时进哪个外壳（决定 database bindings 挂在哪条资源条目下）
 
-	NeedsDatabase bool // 声明了 { kind: database } 资源依赖
+	Resources []ResourceDep // dependencies.resources 原样保留
 
 	// 阶段四合并部署才会用到，阶段一测试用它验证 local 注释规则
 	Local     bool
@@ -72,9 +79,12 @@ func Gen(specs []ComponentSpec, enabledIDs []string) (string, error) {
 		writeComponent(&b, s)
 	}
 
-	if hasDatabaseDep(selected) {
+	blocks := buildResourceBlocks(selected)
+	if len(blocks) > 0 {
 		b.WriteString("\nresources:\n")
-		writeDatabaseBindings(&b, selected)
+		for _, blk := range blocks {
+			writeResourceBlock(&b, blk)
+		}
 	}
 
 	return b.String(), nil
@@ -131,38 +141,72 @@ func writeComponent(b *strings.Builder, s ComponentSpec) {
 	}
 }
 
-func hasDatabaseDep(selected []ComponentSpec) bool {
-	for _, s := range selected {
-		if s.NeedsDatabase {
-			return true
-		}
-	}
-	return false
+// resourceBlock 是产出里的一条 `resources:` 条目。
+type resourceBlock struct {
+	kind         string
+	engine       string
+	componentIDs []string
+	// database 单独走共享外壳登录角色 + SET LOCAL ROLE（决策 3），
+	// 每条 binding 要多写一个 database 字段；其余资源没有这一格。
+	isDatabase bool
 }
 
-// writeDatabaseBindings 把每个声明了数据库资源的组件挂上 componentId
-// bindings（总纲产出 2b）。阶段一（未合并）时每个组件按自己的 Shell
-// 分组挂在对应的资源条目下——即使还没有真的合并进一个进程，用同一套
-// "共享外壳登录角色 + SET LOCAL ROLE" 的凭据结构，阶段四合并时数据库
-// 侧不用再迁移一次。
-func writeDatabaseBindings(b *strings.Builder, selected []ComponentSpec) {
+// buildResourceBlocks 把每个声明了资源依赖的组件挂上 componentId
+// bindings（总纲产出 2b：声明了资源却没有 bindings，`brickkit up` 会阻断）。
+//
+// database 与其余资源种类分两条路径，理由是决策 3——**只有** PostgreSQL
+// 走"每外壳一个共享登录角色"，所以 database 按 Shell 拆成多条资源条目
+// （阶段一未合并时提前用这套凭据结构，阶段四合并时数据库侧不用再迁移一次）；
+// mq/storage/cache/search/smtp 没有这个"每外壳不同凭据"的设计，一种
+// kind+engine 组合只需要一条资源条目，跨外壳的组件共享同一条的 bindings。
+func buildResourceBlocks(selected []ComponentSpec) []resourceBlock {
+	var blocks []resourceBlock
+
 	byShell := map[string][]string{}
 	var shellOrder []string
+
+	type kindEngine struct{ kind, engine string }
+	byKindEngine := map[kindEngine][]string{}
+	var kindEngineOrder []kindEngine
+
 	for _, s := range selected {
-		if !s.NeedsDatabase {
-			continue
+		for _, r := range s.Resources {
+			if r.Kind == "database" {
+				if _, ok := byShell[s.Shell]; !ok {
+					shellOrder = append(shellOrder, s.Shell)
+				}
+				byShell[s.Shell] = append(byShell[s.Shell], s.ID)
+				continue
+			}
+			ke := kindEngine{r.Kind, r.Engine}
+			if _, ok := byKindEngine[ke]; !ok {
+				kindEngineOrder = append(kindEngineOrder, ke)
+			}
+			byKindEngine[ke] = append(byKindEngine[ke], s.ID)
 		}
-		if _, ok := byShell[s.Shell]; !ok {
-			shellOrder = append(shellOrder, s.Shell)
-		}
-		byShell[s.Shell] = append(byShell[s.Shell], s.ID)
 	}
+
 	for _, shell := range shellOrder {
-		fmt.Fprintf(b, "  - kind: database\n")
-		fmt.Fprintf(b, "    engine: postgresql\n")
-		fmt.Fprintf(b, "    bindings:\n")
-		for _, id := range byShell[shell] {
-			fmt.Fprintf(b, "      - componentId: %s\n", id)
+		blocks = append(blocks, resourceBlock{
+			kind: "database", engine: "postgresql",
+			componentIDs: byShell[shell], isDatabase: true,
+		})
+	}
+	for _, ke := range kindEngineOrder {
+		blocks = append(blocks, resourceBlock{
+			kind: ke.kind, engine: ke.engine, componentIDs: byKindEngine[ke],
+		})
+	}
+	return blocks
+}
+
+func writeResourceBlock(b *strings.Builder, blk resourceBlock) {
+	fmt.Fprintf(b, "  - kind: %s\n", blk.kind)
+	fmt.Fprintf(b, "    engine: %s\n", blk.engine)
+	fmt.Fprintf(b, "    bindings:\n")
+	for _, id := range blk.componentIDs {
+		fmt.Fprintf(b, "      - componentId: %s\n", id)
+		if blk.isDatabase {
 			fmt.Fprintf(b, "        database: brickkit_db\n")
 		}
 	}
