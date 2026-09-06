@@ -17,9 +17,9 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
 
-## 现状（阶段一 Task 6）
+## 现状（阶段一 Task 8）
 
-只有子命令清单骨架，逐个实现从 **Task 8** 起（先做 `db-script`/`gen`/`registry` 三个先决产出）。
+已实现 3 个：`registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）。均已用真实 `registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行）跑通，`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等。其余 7 个（`routes`/`features`/`shell-config`/`shell-env`/`shell-depends`/`permissions`/`data-scopes`）留待各自先决条件成熟（组件真正出现、路由/权限设计落地）时再实现。
 
 ## 三条生成器铁律（写进实现与测试时必须守）
 
