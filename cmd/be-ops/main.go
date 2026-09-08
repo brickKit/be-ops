@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
 	"github.com/brickKit/be-ops/internal/genyaml"
 	"github.com/brickKit/be-ops/internal/registry"
@@ -40,6 +41,10 @@ func main() {
 		err = runDBScript(os.Args[2:])
 	case "gen":
 		err = runGen(os.Args[2:])
+	case "permissions":
+		err = runPermissions(os.Args[2:])
+	case "data-scopes":
+		err = runDataScopes(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)
@@ -165,5 +170,64 @@ func runGen(args []string) error {
 		return err
 	}
 	fmt.Printf("✓ %s 已产出（%d 个组件）\n", *out, len(specs))
+	return nil
+}
+
+// runPermissions 是 "permissions --root <path>"：从各组件 assembly.yaml
+// 的 permissions 段聚合出 registry/permissions.tsv（产出 9）。⚠️ 这张表
+// 只增不改——已发布的 key 永远保留，本命令绝不删行，见 internal/authzreg
+// 包文档。
+func runPermissions(args []string) error {
+	fs := flag.NewFlagSet("permissions", flag.ExitOnError)
+	root := fs.String("root", ".", "装配仓库根目录")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	tsvPath := filepath.Join(*root, "registry", "permissions.tsv")
+
+	existing, err := authzreg.ReadPermissionsTSV(tsvPath)
+	if err != nil {
+		return err
+	}
+	decls, err := authzreg.LoadAssemblyDecls(filepath.Join(*root, "components"))
+	if err != nil {
+		return err
+	}
+	rows, warnings, err := authzreg.GenPermissions(existing, decls)
+	if err != nil {
+		return err
+	}
+	for _, w := range warnings {
+		fmt.Fprintln(os.Stderr, "⚠", w)
+	}
+	if err := authzreg.WritePermissionsTSV(tsvPath, rows); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s 已产出（%d 条权限键）\n", tsvPath, len(rows))
+	return nil
+}
+
+// runDataScopes 是 "data-scopes --root <path>"：从各组件 assembly.yaml
+// 的 data_scopes 段聚合出 registry/data-scopes.tsv（产出 10）。这张表纯
+// 派生、不需要防改，每次全量重生成（registry/README.md）。
+//
+// ⚠️ 省略 data_scopes 段的组件会让 LoadAssemblyDecls 报错——不需要也要
+// 显式写 data_scopes: none（导读第 22 条）。
+func runDataScopes(args []string) error {
+	fs := flag.NewFlagSet("data-scopes", flag.ExitOnError)
+	root := fs.String("root", ".", "装配仓库根目录")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	decls, err := authzreg.LoadAssemblyDecls(filepath.Join(*root, "components"))
+	if err != nil {
+		return err
+	}
+	rows := authzreg.GenDataScopes(decls)
+	tsvPath := filepath.Join(*root, "registry", "data-scopes.tsv")
+	if err := authzreg.WriteDataScopesTSV(tsvPath, rows); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s 已产出（%d 条数据权限声明）\n", tsvPath, len(rows))
 	return nil
 }

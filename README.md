@@ -17,9 +17,20 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
 
-## 现状（阶段一 Task 16）
+## 现状（阶段三 Task 3）
 
-已实现 3 个：`registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）。均已用真实 `registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行）跑通，`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等。其余 7 个（`routes`/`features`/`shell-config`/`shell-env`/`shell-depends`/`permissions`/`data-scopes`）留待各自先决条件成熟（组件真正出现、路由/权限设计落地）时再实现。
+已实现 5 个：`registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。其余 5 个（`routes`/`features`/`shell-config`/`shell-env`/`shell-depends`）留待各自先决条件成熟（路由设计落地）时再实现。
+
+### `permissions`/`data-scopes` 的判据（`internal/authzreg`）
+
+- **`permissions.tsv` 只增不改**（导读四张钉死的表之一）：已发布的 key 永远保留，重跑本命令绝不删行——
+  只增量合并（新 key 直接加、已有 key 允许刷新 title/type/owner_component，`deprecated` 列本命令从不
+  设置也不清空）。这次扫描没声明、也没标 `deprecated` 的"孤儿" key 会打印警告，但仍然保留在表里，交给人
+  决定要不要手工打墓碑。同一个 key 被两个不同组件声明会直接报错（权限键必须全局唯一）。
+- **`data-scopes.tsv` 纯派生**（`registry/README.md`：不需要防改）：每次全量重生成，不接受历史基线。
+- **省略 `data_scopes` 段当场报错**（导读第 22 条）：不需要也要显式写 `data_scopes: none`，省略 ≠ none。
+  区分"完全省略"与"标量 none"靠 `*dataScopesField`（指针类型）——`yaml.v3` 对文档里不存在的字段保留
+  指针零值 `nil`，只有字段真的出现过才会分配并调用 `UnmarshalYAML`（见 `internal/authzreg/load.go` 注释）。
 
 ⚠️ **`v0.1.2` 修了一个真实数据踩出来的坑**：`dbscript.Gen()` 原来只对表做 `ALTER DEFAULT PRIVILEGES ... ON TABLES`，没管 `BIGSERIAL` 自增列背后的 SEQUENCE——PostgreSQL 里两者是独立的权限对象，只授权表会让每一张用自增主键的表（全项目标准写法，§11.2.1）第一次 `INSERT` 就报 `permission denied for sequence`。`mdm-customer` 真的跑 `Create` 才暴露，现在两条 `ALTER DEFAULT PRIVILEGES` 都会产出。
 
