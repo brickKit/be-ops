@@ -7,7 +7,7 @@ import (
 
 func TestGen_每组件三样东西(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}})
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestGen_每组件三样东西(t *testing.T) {
 // 表设计规范的标准写法（§11.2.1），不是个例。
 func TestGen_序列也要授权不只是表(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}})
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestGen_组件角色之间互相看不见(t *testing.T) {
 	sql, _ := Gen([]Row{
 		{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"},
 		{Repo: "crm-lead", Schema: "crm_lead", Role: "crm_lead_rw", ShellLoginRole: "shell_go_backoffice"},
-	})
+	}, "")
 	// 权限墙：erp_sales_rw 绝不能拿到 crm_lead 的任何权限
 	if strings.Contains(sql, "ON SCHEMA crm_lead TO erp_sales_rw") {
 		t.Error("跨组件授权，PG RBAC 权限墙被打穿")
@@ -65,7 +65,7 @@ func TestGen_组件角色之间互相看不见(t *testing.T) {
 
 func TestGen_幂等(t *testing.T) {
 	sql, _ := Gen([]Row{{Repo: "mdm-org", Schema: "mdm_org",
-		Role: "mdm_org_rw", ShellLoginRole: "shell_go_core"}})
+		Role: "mdm_org_rw", ShellLoginRole: "shell_go_core"}}, "")
 	// CREATE ROLE 没有 IF NOT EXISTS，必须包在 DO 块里判存在
 	if !strings.Contains(sql, "DO $$") {
 		t.Error("CREATE ROLE 必须包在 DO 块里做存在判断，否则重跑会报 role already exists")
@@ -76,7 +76,7 @@ func TestGen_幂等(t *testing.T) {
 // 建库语句必须在产出里，且必须与 CREATE SCHEMA 分开——
 // PG 不能在一个库内部创建它自己，也不能在同一个事务里 CREATE DATABASE。
 func TestGen_建库语句单独一段(t *testing.T) {
-	sql, _ := Gen(nil)
+	sql, _ := Gen(nil, "")
 	if !strings.Contains(sql, "CREATE DATABASE brickkit_db") {
 		t.Error("缺少 CREATE DATABASE brickkit_db")
 	}
@@ -86,12 +86,39 @@ func TestGen_建库语句单独一段(t *testing.T) {
 	}
 }
 
+// database 参数为空时默认 brickkit_db（生产/真机部署走的那个库，向后
+// 兼容既有调用方）；传自定义名字时必须真的用上，不能被内部忽略——这是
+// 本地"测试库与演示库分开"这条约定的地基（AGENTS.md），传错了会让
+// 建库脚本悄悄还是建在 brickkit_db 上，测试数据继续混进演示数据。
+func TestGen_自定义database名真的生效(t *testing.T) {
+	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "brickkit_test_db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "CREATE DATABASE brickkit_test_db") {
+		t.Error("缺少 CREATE DATABASE brickkit_test_db")
+	}
+	if !strings.Contains(sql, `\connect brickkit_test_db`) {
+		t.Error("缺少 \\connect brickkit_test_db")
+	}
+	if strings.Contains(sql, "brickkit_db'") {
+		t.Errorf("传了自定义 database 名，产出里不该还残留默认库名：\n%s", sql)
+	}
+}
+
+func TestGen_非法database名报错(t *testing.T) {
+	if _, err := Gen(nil, "brickkit-test-db"); err == nil {
+		t.Error("database 名带连字符应该报错——identRe 只认小写字母数字下划线")
+	}
+}
+
 // ⚠️ 实测发现：psql 的 :'var' 替换在 DO $$ ... $$ 块内部不生效（这是
 // psql 的设计行为，不是 bug），直接写 PASSWORD :'pw_xxx' 在 DO 块里会
 // 报 "syntax error at or near ":""。这条测试锁死修法：密码只能在顶层
 // ALTER ROLE 里设，不能出现在任何 DO $$ ... $$ 块内部。
 func TestGen_外壳密码不在DO块内部(t *testing.T) {
-	sql, err := Gen(nil)
+	sql, err := Gen(nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

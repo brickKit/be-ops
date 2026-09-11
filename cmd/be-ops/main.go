@@ -109,16 +109,20 @@ func countComponents(ports []registry.PortRow) int {
 	return n
 }
 
-// runDBScript 是 "db-script --out <path>"：产出幂等建库 SQL（产出 2）。
+// runDBScript 是 "db-script --out <path> [--database <名字>]"：产出幂等
+// 建库 SQL（产出 2）。⚠️ `--database` 默认 `brickkit_db`（生产/真机部署
+// 走的那个库）——本地开发要给测试单独建一个隔离库时才需要显式传，比如
+// `--database brickkit_test_db`，见根 AGENTS.md"测试库与演示库分开"。
 func runDBScript(args []string) error {
 	fs := flag.NewFlagSet("db-script", flag.ExitOnError)
 	root := fs.String("root", ".", "装配仓库根目录")
 	out := fs.String("out", "", "输出文件路径")
+	database := fs.String("database", "brickkit_db", "目标库名（本地测试库用 brickkit_test_db）")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *out == "" {
-		return fmt.Errorf("用法：be-ops db-script --root <path> --out <path>")
+		return fmt.Errorf("用法：be-ops db-script --root <path> --out <path> [--database <名字>]")
 	}
 
 	schemas, err := registry.LoadSchemas(filepath.Join(*root, "registry", "schemas.tsv"))
@@ -131,14 +135,14 @@ func runDBScript(args []string) error {
 			Repo: s.Repo, Schema: s.Schema, Role: s.Role, ShellLoginRole: s.ShellLoginRole,
 		})
 	}
-	sql, err := dbscript.Gen(rows)
+	sql, err := dbscript.Gen(rows, *database)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(*out, []byte(sql), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("✓ 建库脚本已产出：%s（%d 个组件）\n", *out, len(rows))
+	fmt.Printf("✓ 建库脚本已产出：%s（%d 个组件，目标库 %s）\n", *out, len(rows), *database)
 	return nil
 }
 

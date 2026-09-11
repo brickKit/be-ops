@@ -37,7 +37,22 @@ var shellLoginRoles = []string{
 // ⚠️ 三段顺序不能变：CREATE DATABASE 必须在事务外、且单独执行一次
 // （PG 不能在一个库内部创建它自己）；外壳登录角色必须先于组件角色存在，
 // 因为后面的 GRANT <组件角色> TO <外壳角色> 需要外壳角色已经建好。
-func Gen(rows []Row) (string, error) {
+//
+// database 是目标库名——默认部署场景永远是 brickkit_db，但本地开发
+// 还需要给测试单独建一个隔离库（跟真机演示数据物理分开，不是靠"记得
+// 跑清理脚本"这种约定）。⚠️ 只有第 1/2 段用得到这个参数（CREATE
+// DATABASE 语句本身 + `\connect` 目标）；第 3 段（schema/role/授权）
+// 天然库无关——PostgreSQL 的 ROLE 是**集群级**对象，不属于任何一个
+// database，`\connect` 到哪个库执行，schema 就建在哪个库，role 不需要
+// 重建（已经在 brickkit_db 建过一次，全局可见）；只有 SCHEMA 本身是
+// per-database 对象，必须在每个库里各建一份。
+func Gen(rows []Row, database string) (string, error) {
+	if database == "" {
+		database = "brickkit_db"
+	}
+	if !identRe.MatchString(database) {
+		return "", fmt.Errorf("非法 database 名：%q", database)
+	}
 	for _, r := range rows {
 		if !identRe.MatchString(r.Schema) {
 			return "", fmt.Errorf("非法 schema 名：%q（来自 %s）", r.Schema, r.Repo)
@@ -57,12 +72,12 @@ func Gen(rows []Row) (string, error) {
 	//    让每个组件的运行期账号都有它是全平台提权；且 PG 不能在一个库
 	//    内部创建它自己）。
 	b.WriteString("-- ═══ 第 1 段：建库。必须单独连到 postgres 库执行一次 ═══\n")
-	b.WriteString("SELECT 'CREATE DATABASE brickkit_db'\n")
-	b.WriteString(" WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'brickkit_db')\\gexec\n\n")
+	fmt.Fprintf(&b, "SELECT 'CREATE DATABASE %s'\n", database)
+	fmt.Fprintf(&b, " WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '%s')\\gexec\n\n", database)
 
-	// ═══ 第 2 段：5 个外壳登录角色。连到 brickkit_db 执行 ═══
-	b.WriteString("-- ═══ 第 2 段：5 个外壳登录角色。连到 brickkit_db 执行 ═══\n")
-	b.WriteString("\\connect brickkit_db\n\n")
+	// ═══ 第 2 段：5 个外壳登录角色。连到目标库执行 ═══
+	b.WriteString("-- ═══ 第 2 段：5 个外壳登录角色。连到目标库执行 ═══\n")
+	fmt.Fprintf(&b, "\\connect %s\n\n", database)
 	for _, shell := range shellLoginRoles {
 		// ⚠️ 实测修正：psql 的 :'var' 变量替换在 DO $$ ... $$ 块内部不生效
 		// ——这是 psql 的设计行为（避免破坏函数体里可能出现的字面量），
