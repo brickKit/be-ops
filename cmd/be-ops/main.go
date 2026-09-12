@@ -45,6 +45,12 @@ func main() {
 		err = runPermissions(os.Args[2:])
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
+	case "shell-config":
+		err = runShellConfig(os.Args[2:])
+	case "shell-env":
+		err = runShellEnv(os.Args[2:])
+	case "shell-depends":
+		err = runShellDepends(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)

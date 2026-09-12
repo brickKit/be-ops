@@ -24,6 +24,15 @@ type componentYAML struct {
 	} `yaml:"dependencies"`
 	Deployment struct {
 		Labels map[string]string `yaml:"labels"`
+		// Port 是这个组件单跑时监听的 HTTP 端口——合并部署下 local:true
+		// 的 localPort 直接复用这个值，不是另外分配一个（导读："外壳
+		// 启动器要从每个模块自己的 component.yaml 读端口，不许在外壳里
+		// 另写一份端口表"，设计书 §13.8.1）。
+		Port       int `yaml:"port"`
+		ExtraPorts []struct {
+			Name string `yaml:"name"`
+			Port int    `yaml:"port"`
+		} `yaml:"extraPorts"`
 	} `yaml:"deployment"`
 }
 
@@ -129,6 +138,24 @@ func loadOne(dir string) (ComponentSpec, bool, error) {
 		AssemblyRole: asm.Asset.AssemblyRole,
 		SlotName:     asm.Asset.SlotName,
 		Shell:        asm.Shell,
+		Port:         comp.Deployment.Port,
+		Schema:       asm.Data.Schema,
+		Role:         asm.Data.Role,
+	}
+	// ⚠️ local:true 的 localPort 直接复用组件自己单跑时的端口，不是另外
+	// 分配一个——设计书 §13.8.1："外壳启动器要从每个模块自己的
+	// component.yaml 读端口，不许在外壳里另写一份端口表"。这条只在
+	// Shell 非空（这个组件确实要合并部署）时才生效，见 gen.go 的
+	// ComponentSpec.Local 注释。
+	if asm.Shell != "" {
+		spec.Local = true
+		spec.LocalPort = comp.Deployment.Port
+	}
+	if len(comp.Deployment.ExtraPorts) > 0 {
+		spec.ExtraPorts = make(map[string]int, len(comp.Deployment.ExtraPorts))
+		for _, p := range comp.Deployment.ExtraPorts {
+			spec.ExtraPorts[p.Name] = p.Port
+		}
 	}
 	if len(comp.Deployment.Labels) > 0 {
 		spec.Labels = make(map[string]any, len(comp.Deployment.Labels))

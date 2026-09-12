@@ -38,9 +38,22 @@ type ComponentSpec struct {
 
 	Resources []ResourceDep // dependencies.resources 原样保留
 
-	// 阶段四合并部署才会用到，阶段一测试用它验证 local 注释规则
+	// 阶段一测试用它验证 local 注释规则；阶段四起由 loadOne 依据 Shell
+	// 是否非空真实计算（LocalPort = Port，不是另外分配，见 loadOne 注释）。
 	Local     bool
 	LocalPort int
+
+	// Port/ExtraPorts 是 component.yaml 的 deployment.port/extraPorts 原样
+	// 保留——LocalPort 由它推导，产出 4（合并清单）也要用它给外壳里的每个
+	// 模块分端口，不重新发明一份端口来源。
+	Port       int
+	ExtraPorts map[string]int
+
+	// Schema/Role 是 assembly.yaml 的 data.schema/data.role——产出 4 用它
+	// 给每个模块的迁移拼 schema，产出 7 判断"这条依赖是不是也在合并态"
+	// 时同样要核对对方的 Shell，但 Schema/Role 是"这个组件自己"的身份。
+	Schema string
+	Role   string
 }
 
 var exactVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
