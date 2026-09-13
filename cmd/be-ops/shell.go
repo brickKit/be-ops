@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/brickKit/be-ops/internal/genyaml"
@@ -146,27 +147,55 @@ func versionedServiceName(id, version string) string {
 	return strings.ToLower(s)
 }
 
-// readDotEnv 解析一份 KEY=VALUE 形式的 .env 文件——不处理 shell 转义/
-// 多行值这类复杂语法，`brickkit up --dry-run` 生成的 local-debug 文件
-// 只有简单的单行赋值，够用即可。
+// envKeyRe 是一个合法 dotenv key 的形状——全大写字母/数字/下划线，
+// 不以数字开头（同这个项目自己给环境变量取名的既有约定）。用来把
+// "真的是 KEY=VALUE 这一行" 和 "PEM/base64 续行里恰好也带了一个
+// `=`" 区分开，见 readDotEnv 的踩坑记录。
+var envKeyRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+
+// readDotEnv 解析一份 KEY=VALUE 形式的 .env 文件。
+//
+// ⚠️ 阶段四 Task 6 真机部署 infra-iam-casdoor 时撞到的真实 bug（分两轮
+// 才修对，第二轮是真机跑起来才暴露的）：
+//
+//  1. `appTokenSigningKeyPem` 这类多行 PEM 值，brickKit CLI 生成
+//     local-debug 文件时是**原样把换行符写进文件**，不加引号也不转义
+//     （`cat -A` 核对过真实文件内容）——本函数原来的实现只认单行
+//     `KEY=VALUE`，PEM 后续每一行都因为没有 `=` 被当成无效行悄悄跳过，
+//     值被截断成只剩第一行，真机表现是 infra-iam-casdoor 报
+//     "appTokenSigningKeyPem 不是合法的 PEM"直接退出。第一轮修复：
+//     没有 `=` 的行视为上一个 key 的值的延续。
+//  2. 第一轮修复上线后真机再跑一次，PEM 又在**倒数第二行**被截断——
+//     Base64 编码的结尾常见 1-2 个 `=` 补齐符（这把真实 RSA 密钥的
+//     倒数第二行恰好是 `...XO2UJJaX/FXH` 后面紧跟一个以 `=` 结尾的
+//     续行），naive 的"这行有没有 `=`"判据把这种续行也误判成
+//     "KEY=VALUE"，多行值被错误地从这里截断、后续内容被拼到一个
+//     瞎编出来的假 key 上。真正的判据不是"这行有没有 `=`"，而是
+//     "`=` 前面那一段像不像一个合法的 dotenv key"（全大写字母/数字/
+//     下划线）——PEM/Base64 续行永远不会长这样，改用 envKeyRe 判定。
 func readDotEnv(path string) (map[string]string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]string{}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
+	var lastKey string
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		idx := strings.Index(line, "=")
-		if idx < 0 {
+		if idx < 0 || !envKeyRe.MatchString(line[:idx]) {
+			if lastKey != "" {
+				out[lastKey] += "\n" + line
+			}
 			continue
 		}
 		key := line[:idx]
 		val := strings.Trim(line[idx+1:], `"`)
 		out[key] = val
+		lastKey = key
 	}
 	return out, nil
 }
