@@ -104,10 +104,24 @@ func runShellEnv(args []string) error {
 		if s.Shell == "" {
 			continue
 		}
+		// ⚠️ `ComponentSpec.Local` 是 assembly.yaml 的既定意图（"迟早要
+		// 合并"），不是"brickkit.yaml 此刻是不是真的写了 local: true"——
+		// 外壳分组从阶段一就写死了，但各外壳原子式切换是分任务做的
+		// （阶段四 Task 6/7），两者从来不是同一时间点。唯一真实反映
+		// "此刻是不是已经切了"的信号是文件是否存在：还没切换的组件，
+		// brickkit up --dry-run 根本不会给它生成 local-debug 文件，这是
+		// 正常状态，不是"忘了先 dry-run"——所以这里缺文件不当错误处理，
+		// 单纯跳过，交给 shellenv.Gen 按"这个外壳的成员是否全部拿到了
+		// 数据"去判断整个外壳该不该处理（见该包文档）。真的忘了跑
+		// dry-run 时，受影响的外壳会从产出里完全消失，`shell-env` 命令
+		// 自己打印的"已产出（N 个外壳）"里 N 会明显偏小，足够引起注意。
 		name := "local-debug." + versionedServiceName(s.ID, s.Version) + ".env"
 		env, err := readDotEnv(filepath.Join(*localDebugDir, name))
 		if err != nil {
-			return fmt.Errorf("读 %s 失败（是不是忘了先 brickkit up --dry-run，或者这个组件还没在 brickkit.yaml 里标成 local: true）：%w", name, err)
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("读 %s 失败：%w", name, err)
 		}
 		localDebug[s.ID] = env
 	}

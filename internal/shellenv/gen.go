@@ -8,6 +8,13 @@
 // 的那份，早晚和平台的算法分叉"——本包因此只重写"依赖地址"这一类 key
 // （识别方式：值形如 `http://localhost:<port>`，那正是 brickKit 对
 // `local:true` 依赖的既有重写结果，见 §13.1），其余 key 原样透传。
+//
+// ⚠️ 外壳分组（`registry/schemas.tsv`）与外壳原子式切换（`local: true`）
+// 不是同一时间发生的——前者阶段一就写死了全部 4 个外壳，后者是分阶段
+// 任务做的（阶段四 Task 6 先切 3 个 Go 外壳，Task 7 才轮到 py-render）。
+// `Gen` 因此按外壳为单位做门槛：一个外壳只要还有成员没 `local: true`，
+// 整个外壳直接跳过、不报错——那是"还没轮到"，不是"忘了先
+// `brickkit up --dry-run`"（真机撞到过这个场景，见阶段四 Task 6）。
 package shellenv
 
 import (
@@ -69,8 +76,33 @@ func Gen(specs []genyaml.ComponentSpec, localDebug map[string]map[string]string)
 
 	shells := make([]ShellEnv, 0, len(shellOrder))
 	for _, name := range shellOrder {
+		members := grouped[name]
+
+		// ⚠️ 阶段四 Task 6 真机跑到的场景：assembly.yaml 的 shell 字段
+		// 早在阶段一就给全部 4 个外壳分好组了，但各外壳原子式切换成
+		// local: true 是分任务做的（Task 6 先切 3 个 Go 外壳，Task 7
+		// 才轮到 py-render）。`genyaml.ComponentSpec.Local` 反映的是
+		// assembly.yaml 的"迟早要合并"这个既定意图，不是 brickkit.yaml
+		// 此刻是否真的写了 local: true——两者不是一回事（真机验证时才
+		// 发现：Local 对这四个外壳的全部成员从阶段一起就一直是 true，
+		// 拿它当"有没有真的切换过"的判据完全没有区分力）。唯一真实反映
+		// "brickkit.yaml 此刻是不是已经切了"的信号，是 `brickkit up
+		// --dry-run` 到底有没有为这个组件生成 local-debug 文件——所以
+		// 判据改成"这个外壳的全部成员是不是都能在 localDebug 里查到"，
+		// 缺一个就说明这个外壳整体还没轮到，跳过、不报错。
+		allPresent := true
+		for _, s := range members {
+			if _, ok := localDebug[s.ID]; !ok {
+				allPresent = false
+				break
+			}
+		}
+		if !allPresent {
+			continue
+		}
+
 		var modules []ModuleEnv
-		for _, s := range grouped[name] {
+		for _, s := range members {
 			raw, ok := localDebug[s.ID]
 			if !ok {
 				return nil, fmt.Errorf("模块 %s 没有对应的 local-debug env（是不是忘了先 brickkit up --dry-run）", s.ID)

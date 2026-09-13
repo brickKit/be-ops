@@ -6,8 +6,12 @@ import (
 	"github.com/brickKit/be-ops/internal/genyaml"
 )
 
+// mod 造的组件默认 Local: true——本文件绝大多数用例测的是"这个外壳
+// 已经原子式切换完，产出 7 该怎么改写"，不是切换时机本身。切换时机的
+// 场景见 TestGen_外壳还没原子式切换完时跳过不报错，那条用例会显式传
+// Local: false。
 func mod(id, shell string, extraPorts map[string]int, deps ...string) genyaml.ComponentSpec {
-	s := genyaml.ComponentSpec{ID: id, Version: "1.0.0", Shell: shell, ExtraPorts: extraPorts}
+	s := genyaml.ComponentSpec{ID: id, Version: "1.0.0", Shell: shell, ExtraPorts: extraPorts, Local: true}
 	for _, d := range deps {
 		s.Dependencies = append(s.Dependencies, genyaml.Dependency{ID: d})
 	}
@@ -133,12 +137,59 @@ func TestGen_非依赖地址的key原样保留(t *testing.T) {
 	}
 }
 
-// TestGen_缺少local_debug数据时报错不静默 防的是"忘了先 brickkit up
-// --dry-run 就跑产出 7，生成一份缺胳膊少腿的环境变量表"。
-func TestGen_缺少local_debug数据时报错不静默(t *testing.T) {
+// TestGen_缺少local_debug数据时整个外壳静默跳过 覆盖两类此前会被
+// 混为一谈的场景：①真的忘了先 brickkit up --dry-run；②这个外壳的
+// assembly.yaml 早就声明了 shell 字段，但 brickkit.yaml 里原子式切换
+// 成 local: true 是分任务做的（阶段四 Task 6 真机跑到的场景：Task 6
+// 先切 3 个 Go 外壳，Task 7 才轮到 py-render），还没轮到的外壳自然没有
+// local-debug 数据。两种情况从 `Gen` 的输入形状上根本无法区分——`Gen`
+// 因此统一处理成"跳过这整个外壳，不报错"，不再对①单独报错：真忘了
+// dry-run 时，受影响的外壳会从产出里整体消失，调用方自己打印的
+// "已产出（N 个外壳）"里 N 会明显偏小，这是调用方（cmd/be-ops）该负责
+// 的可见性，不是本包该报的错。
+func TestGen_缺少local_debug数据时整个外壳静默跳过(t *testing.T) {
 	specs := []genyaml.ComponentSpec{mod("mdm/customer", "go-shell-core", nil)}
-	if _, err := Gen(specs, map[string]map[string]string{}); err == nil {
-		t.Fatal("期望报错，实际没有")
+	out, err := Gen(specs, map[string]map[string]string{})
+	if err != nil {
+		t.Fatalf("不应该报错，应该静默跳过：%v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("数据缺失的外壳应该完全不出现在产出里，实际 %+v", out)
+	}
+}
+
+// TestGen_外壳还没原子式切换完时跳过不报错 是阶段四 Task 6 真机跑到的
+// 场景：registry/schemas.tsv 从阶段一就把全部 4 个外壳分好组了，但各
+// 外壳原子式切换成 local: true 是分任务做的（Task 6 先切 3 个 Go 外壳，
+// Task 7 才轮到 py-render）。py-render 只有 infra/print 一个成员、还没
+// 切换时，不该拖累其余三个已经切换完的 Go 外壳——那是"这个外壳还没
+// 轮到"，判据是"这个外壳的成员是否都能在 localDebug 里查到"，不是
+// `ComponentSpec.Local`（那个字段反映 assembly.yaml 的既定意图，从
+// 阶段一起对全部 4 个外壳就一直是 true，没有区分力）。
+func TestGen_外壳还没原子式切换完时跳过不报错(t *testing.T) {
+	notYetMerged := genyaml.ComponentSpec{ID: "infra/print", Version: "1.0.0", Shell: "py-render", Local: true}
+	specs := []genyaml.ComponentSpec{
+		mod("mdm/customer", "go-shell-core", nil),
+		notYetMerged,
+	}
+	localDebug := map[string]map[string]string{
+		"mdm/customer": {"COMPONENT_ID": "mdm/customer"},
+		// 故意不给 infra/print 任何 local-debug 数据——它 brickkit.yaml
+		// 里还没真的写 local: true，brickkit up --dry-run 根本不会为它
+		// 生成这份文件，这是正常状态。
+	}
+
+	out, err := Gen(specs, localDebug)
+	if err != nil {
+		t.Fatalf("已切换的外壳不该被还没切换的外壳拖累报错：%v", err)
+	}
+	if moduleEnv(out, "go-shell-core", "mdm/customer") == nil {
+		t.Fatal("go-shell-core 已经切换完，应该正常出现在结果里")
+	}
+	for _, sh := range out {
+		if sh.Name == "py-render" {
+			t.Fatal("py-render 还没原子式切换完，不应该出现在产出里")
+		}
 	}
 }
 
