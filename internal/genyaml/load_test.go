@@ -279,6 +279,41 @@ components:
 	}
 }
 
+// TestLoadBrickkitConfig_展开VAR占位符 是阶段四附加 Task 0.4 真机复现出
+// 的第二个真实 bug 的回归测试：brickkit.yaml 里 ${APP_TOKEN_SIGNING_KEY_PEM}
+// 这类写法留给 brickKit 自己的注入引擎在生成阶段展开，本函数原来只是
+// 纯 YAML 解析、原样返回字面量——SHELL_CONFIG_JSON 里灌进去的会是这串
+// 占位符本身，不是真实密钥。查不到对应环境变量时必须保留原样（不报错、
+// 不替换成空字符串），跟 brickKit 的 ExpandEnv 同样的语义。
+func TestLoadBrickkitConfig_展开VAR占位符(t *testing.T) {
+	t.Setenv("FAKE_SECRET_FOR_TEST", "真实密钥内容")
+
+	root := t.TempDir()
+	content := `
+components:
+  - id: infra/iam-casdoor
+    version: 1.0.7
+    config:
+      appTokenSigningKeyPem: "${FAKE_SECRET_FOR_TEST}"
+      casdoorBaseUrl: "${THIS_VAR_DOES_NOT_EXIST}"
+`
+	path := filepath.Join(root, "brickkit.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadBrickkitConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg["infra/iam-casdoor"]["appTokenSigningKeyPem"]; got != "真实密钥内容" {
+		t.Fatalf("${FAKE_SECRET_FOR_TEST} 应该展开成真实环境变量的值，实际 %q", got)
+	}
+	if got := cfg["infra/iam-casdoor"]["casdoorBaseUrl"]; got != "${THIS_VAR_DOES_NOT_EXIST}" {
+		t.Fatalf("查不到的环境变量应该保留原样，不能报错也不能变成空字符串，实际 %q", got)
+	}
+}
+
 func TestMergeConfig_覆盖优先于默认值(t *testing.T) {
 	defaults := map[string]string{"pgSchema": "mdm_customer", "otelBaseUrl": ""}
 	overrides := map[string]string{"authzBundleUrl": "http://x", "otelBaseUrl": "http://otel"}

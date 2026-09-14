@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -214,6 +215,20 @@ type brickkitYAML struct {
 // component.yaml/assembly.yaml 里——genyaml.Load 读不到，必须单独
 // 读这一份文件（阶段四附加 Task 0.2 调研记录：这条数据 servedBy 场景下
 // 没有平台产物可以借用，只能自己从两份已知 YAML 合并出来）。
+//
+// ⚠️ 阶段四附加 Task 0.4 真机复现过的第二个真实 bug：`brickkit.yaml`
+// 里像 `appTokenSigningKeyPem: "${APP_TOKEN_SIGNING_KEY_PEM}"` 这种
+// `${VAR}` 写法是留给 brickKit 自己的注入引擎在生成阶段展开的（真实
+// 密钥来自调用方的进程环境/`.env`），本函数只是纯 YAML 解析，原样返回
+// 字面量字符串——如果不在这里也展开一遍，`SHELL_CONFIG_JSON` 里灌进去
+// 的就是这串 `${VAR}` 占位符本身，而不是真实密钥，`infra-iam-casdoor`/
+// `integration-im-dingtalk` 在外壳里读到的会是这串没意义的占位符，不是
+// 真机能立刻看出来的报错（appTokenSigningKeyPem 校验 PEM 格式时才会
+// 间接暴露）。展开算法（正则、`os.LookupEnv` 查不到就保留原样不报错）
+// 与 brickKit `internal/config/parse.go` 的 `ExpandEnv` 逐字一致——
+// 调用方（`be-ops shell-config`）因此要求跟 brickKit 本身同样的前提：
+// 运行前先 `set -a; source .env; set +a`，不能默认这里能连到某个专门
+// 的密钥存储。
 func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
 	var doc brickkitYAML
 	if err := readYAML(path, &doc); err != nil {
@@ -224,9 +239,35 @@ func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
 		if len(c.Config) == 0 {
 			continue
 		}
-		out[c.ID] = c.Config
+		expanded := make(map[string]string, len(c.Config))
+		for k, v := range c.Config {
+			expanded[k] = expandEnv(v)
+		}
+		out[c.ID] = expanded
 	}
 	return out, nil
+}
+
+// envVarRe 匹配 ${ENV_VAR} 引用，与 brickKit internal/config/parse.go 的
+// envVarRe 逐字一致（两个独立 Go module 之间不能互相 import，只能各自
+// 实现并保持算法同步）。
+var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// expandEnv 把字符串里的 ${ENV_VAR} 替换成环境变量的值，查不到就保留
+// 原样（不报错，也不替换成空字符串）——跟 brickKit 的 ExpandEnv 同样的
+// 语义，让漏配的变量在生成结果里一眼看得出来，而不是被替换掉之后凭空
+// 消失。
+func expandEnv(s string) string {
+	if !strings.Contains(s, "${") {
+		return s
+	}
+	return envVarRe.ReplaceAllStringFunc(s, func(match string) string {
+		name := match[2 : len(match)-1]
+		if value, ok := os.LookupEnv(name); ok {
+			return value
+		}
+		return match
+	})
 }
 
 // MergeConfig 合并"component.yaml 的默认值"与"brickkit.yaml 的字面量
