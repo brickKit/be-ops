@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -232,18 +234,62 @@ func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
 // brickkit.yaml 写了的 key 覆盖默认值（不管默认值是否存在）。这条合并
 // 规则跟 brickKit 自己的注入引擎对 configSchema 项的既有语义一致——
 // 都是读同一份 brickkit.yaml/component.yaml，不是凭空另算一套。
+//
+// ⚠️ 阶段四附加 Task 0.4 真机复现过的一个真实 bug：结果的 key 必须转成
+// SCREAMING_SNAKE_CASE（"defaultWarehouseId" → "DEFAULT_WAREHOUSE_ID"），
+// 不能保留 component.yaml 里写的原始 camelCase——`besdk.Config`（模块
+// 代码读配置唯一入口）的 String/MustString 内部会把调用方传的 key 转成
+// SCREAMING_SNAKE_CASE 再去查表，因为 brickKit 自己的注入引擎
+// （internal/inject.Build）就是把 configSchema 每一项转成这个形状才写
+// 进真实容器环境变量的（"pgSchema" → "PG_SCHEMA"）。这里如果直接原样
+// 转发 camelCase key，`rt.Config.String("pgSchema")` 转完查的是
+// "PG_SCHEMA"，表里却只有 "pgSchema"，查不到——有 default 的项静默退化
+// 成默认值（不报错，行为却是错的，同十七条第 6 条"配置项被跳过只报警告"
+// 那一类坑），没有 default、用 MustString 的项直接 panic 崩容器（真机
+// 是被 erp/sales 的 defaultWarehouseId 第一次真的暴露出来的——它是全项目
+// 唯一一个没写 default、真的用 MustString 的必填项）。转换算法跟
+// brickKit `internal/inject/reserved.go` 的 EnvVarName 逐字一致（两个
+// 独立 Go module 之间不能互相 import，只能各自实现并保持算法同步，
+// 同 be-sdk-go `configEnvVarName` 的既有先例）。
 func MergeConfig(defaults, overrides map[string]string) map[string]string {
 	if len(defaults) == 0 && len(overrides) == 0 {
 		return nil
 	}
-	out := make(map[string]string, len(defaults)+len(overrides))
+	merged := make(map[string]string, len(defaults)+len(overrides))
 	for k, v := range defaults {
-		out[k] = v
+		merged[k] = v
 	}
 	for k, v := range overrides {
-		out[k] = v
+		merged[k] = v
+	}
+	out := make(map[string]string, len(merged))
+	for k, v := range merged {
+		out[configEnvVarName(k)] = v
 	}
 	return out
+}
+
+// configEnvVarName 把 configSchema 属性名（camelCase，如 "pgSchema"）转成
+// 平台注入环境变量时真正用的名字（SCREAMING_SNAKE_CASE，如 "PG_SCHEMA"）
+// ——算法与 brickKit `internal/inject/reserved.go` 的 EnvVarName、
+// be-sdk-go 的 configEnvVarName 逐字一致，见 MergeConfig 的注释。
+func configEnvVarName(key string) string {
+	var b strings.Builder
+	runes := []rune(key)
+	for i, r := range runes {
+		switch {
+		case r == '-' || r == '.' || r == ' ':
+			b.WriteRune('_')
+		case unicode.IsUpper(r):
+			if i > 0 && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
+				b.WriteRune('_')
+			}
+			b.WriteRune(r)
+		default:
+			b.WriteRune(unicode.ToUpper(r))
+		}
+	}
+	return b.String()
 }
 
 func readYAML(path string, out any) error {

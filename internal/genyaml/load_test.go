@@ -285,13 +285,16 @@ func TestMergeConfig_覆盖优先于默认值(t *testing.T) {
 
 	merged := MergeConfig(defaults, overrides)
 
-	if merged["pgSchema"] != "mdm_customer" {
+	// 结果的 key 是 SCREAMING_SNAKE_CASE，不是原始的 camelCase——见
+	// MergeConfig 本体注释：besdk.Config 查表前会把调用方传的 key 转成
+	// 这个形状，这里如果不转，真机会panic/悄悄退化成默认值。
+	if merged["PG_SCHEMA"] != "mdm_customer" {
 		t.Fatalf("只有默认值的 key 应该保留默认值：%+v", merged)
 	}
-	if merged["authzBundleUrl"] != "http://x" {
+	if merged["AUTHZ_BUNDLE_URL"] != "http://x" {
 		t.Fatalf("只有覆盖值的 key 应该用覆盖值：%+v", merged)
 	}
-	if merged["otelBaseUrl"] != "http://otel" {
+	if merged["OTEL_BASE_URL"] != "http://otel" {
 		t.Fatalf("两边都有时覆盖值应该赢：%+v", merged)
 	}
 }
@@ -299,6 +302,28 @@ func TestMergeConfig_覆盖优先于默认值(t *testing.T) {
 func TestMergeConfig_两边都空返回nil(t *testing.T) {
 	if got := MergeConfig(nil, nil); got != nil {
 		t.Fatalf("两边都空应该返回 nil，得到 %+v", got)
+	}
+}
+
+// TestMergeConfig_key转成SCREAMING_SNAKE_CASE 是阶段四附加 Task 0.4 真机
+// 复现出的真实 bug 的回归测试：erp/sales 的 defaultWarehouseId 没有
+// default、真的用 besdk.Config.MustString 读取，真机部署时直接 panic
+// 崩容器——根因是这里原来直接转发 camelCase key，besdk.Config 内部查表
+// 前会做一次 camelCase → SCREAMING_SNAKE_CASE 转换，两边的 key 形状对
+// 不上。
+func TestMergeConfig_key转成SCREAMING_SNAKE_CASE(t *testing.T) {
+	defaults := map[string]string{"defaultWarehouseId": "1", "pgSchema": "erp_sales"}
+
+	merged := MergeConfig(defaults, nil)
+
+	if merged["DEFAULT_WAREHOUSE_ID"] != "1" {
+		t.Fatalf("defaultWarehouseId 应该转成 DEFAULT_WAREHOUSE_ID：%+v", merged)
+	}
+	if merged["PG_SCHEMA"] != "erp_sales" {
+		t.Fatalf("pgSchema 应该转成 PG_SCHEMA：%+v", merged)
+	}
+	if _, ok := merged["defaultWarehouseId"]; ok {
+		t.Fatalf("原始 camelCase key 不应该还留在结果里：%+v", merged)
 	}
 }
 
