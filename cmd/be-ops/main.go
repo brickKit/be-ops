@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
@@ -95,16 +96,20 @@ func runRegistry(args []string) error {
 		}
 		return fmt.Errorf("端口册与 schema 册不自洽（%d 条）", len(errs))
 	}
-	fmt.Printf("✓ 端口册与 schema 册自洽（%d 个组件 + 带外容器，端口两两不重复）\n", countComponents(ports))
+	fmt.Printf("✓ 端口册与 schema 册自洽（%d 个组件 + 带外容器/外壳自身，端口两两不重复）\n", countComponents(ports))
 	return nil
 }
 
+// countComponents 只是给命令行输出报个数用的，跟 checkComponentCount
+// 内部校验用的判据保持一致（_infra-/_shell- 两个前缀都不算进"组件"
+// 这个词，避免打印出来的数字跟"应该是 62"这句话对不上，误导人）。
 func countComponents(ports []registry.PortRow) int {
 	n := 0
 	for _, p := range ports {
-		if len(p.Repo) < 7 || p.Repo[:7] != "_infra-" {
-			n++
+		if strings.HasPrefix(p.Repo, "_infra-") || strings.HasPrefix(p.Repo, "_shell-") {
+			continue
 		}
+		n++
 	}
 	return n
 }
