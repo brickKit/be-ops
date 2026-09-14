@@ -26,15 +26,28 @@ import (
 
 // runShellConfig 是 "shell-config --out <path>"：产出合并清单（产出 4，
 // 阶段四附加 Task 0.2 起同时承担原产出 7 的 configSchema 传递职责）。
+//
+// "--shell <name>" 是阶段四附加 Task 0.4 新增的用法：只打印这一个外壳
+// 的 Modules 数组（compact JSON，一行），不写文件——这一行就是要粘贴进
+// `brickkit.yaml` 该外壳组件条目 `config.shellConfigJson` 的值。
+//
+// ⚠️ 为什么外壳自己拿合并清单要用这条命令手动跑、粘贴进 brickkit.yaml，
+// 而不是外壳启动时自己动态算：brickKit 的 manifest 模型没有 volumes
+// 字段（AGENTS.md 早就记过这条限制），servedBy 外壳因此没有"挂载一份
+// 文件进容器"这条路可走——只能像 infra/authz 的 permissionCatalog 一样，
+// 把生成的内容当一个普通的 configSchema 字符串值，写死在 brickkit.yaml
+// 里，改了源头数据（哪些组件属于这个外壳、它们的端口/schema/config）之后
+// 重新跑一次这条命令、手动把新的字符串贴回去。
 func runShellConfig(args []string) error {
 	fs := flag.NewFlagSet("shell-config", flag.ExitOnError)
 	root := fs.String("root", ".", "装配仓库根目录")
-	out := fs.String("out", "", "输出文件路径（JSON）")
+	out := fs.String("out", "", "输出文件路径（JSON），跟 --shell 二选一")
+	shellName := fs.String("shell", "", "只打印这一个外壳的 modules（compact JSON，粘贴进 brickkit.yaml 用），跟 --out 二选一")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *out == "" {
-		return fmt.Errorf("用法：be-ops shell-config --root <path> --out <path>")
+	if (*out == "") == (*shellName == "") {
+		return fmt.Errorf("用法：be-ops shell-config --root <path> --out <path>  或  be-ops shell-config --root <path> --shell <外壳名>")
 	}
 
 	specs, err := genyaml.Load(filepath.Join(*root, "components"))
@@ -53,6 +66,22 @@ func runShellConfig(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	if *shellName != "" {
+		for _, s := range shells {
+			if s.Name != *shellName {
+				continue
+			}
+			data, err := json.Marshal(s.Modules)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+		return fmt.Errorf("找不到外壳 %q（assembly.yaml 的 shell 字段里没有任何组件写这个名字）", *shellName)
+	}
+
 	if err := writeJSON(*out, shells); err != nil {
 		return err
 	}
