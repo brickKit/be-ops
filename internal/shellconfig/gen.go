@@ -23,6 +23,13 @@ type Module struct {
 	Schema      string         `json:"schema"`
 	HTTPPort    int            `json:"httpPort"`
 	ExtraPorts  map[string]int `json:"extraPorts,omitempty"`
+	// Config 是这个模块的 configSchema 解析结果——component.yaml 的
+	// default 与 brickkit.yaml 的 config: 字面量已经合并好（调用方用
+	// genyaml.MergeConfig 算出来，见 cmd/be-ops/shell.go），本包原样
+	// 转发，不重新合并。这是原产出 7（`shellenv`）唯一还有意义的那部分
+	// 职责（阶段四附加 Task 0.2 调研记录：地址改写已被 servedBy 原生
+	// 取代，configSchema 传递没有平台产物可借用，只能自己算）。
+	Config map[string]string `json:"config,omitempty"`
 }
 
 // Shell 是一个外壳实例——本阶段对应 `go-shell-core`/`go-shell-backoffice`/
@@ -67,6 +74,7 @@ func Gen(specs []genyaml.ComponentSpec) ([]Shell, error) {
 				Schema:      s.Schema,
 				HTTPPort:    s.Port,
 				ExtraPorts:  s.ExtraPorts,
+				Config:      s.Config,
 			})
 		}
 		shells = append(shells, Shell{Name: name, Modules: modules})

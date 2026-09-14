@@ -2,24 +2,24 @@
 
 BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.yaml`——它是我们自己的命令行工具，读全部组件的 `assembly.yaml` 产出平台刻意不做、而活不会消失的那些东西（总纲 §2.4，决策 89/93）。
 
-## 11 个产出，10 个子命令
+## 11 个产出，8 个子命令
+
+⚠️ **产出 7（每外壳环境变量表）、产出 8（`shell-compose` 的 `depends_on`）已在 `servedBy` 迁移（阶段四附加 Task 0.2）里整体退休**：两者的"依赖地址改写"职责被 brickKit 原生的 `servedBy` 合并取代，产出 7 剩下的"给每个模块传它自己的 configSchema 解析结果"这部分职责并入了产出 4（`shell-config`，见下表），不再需要单独的子命令/产出。完整调研过程见装配仓库 `docs/plans/04b-验证记录.md` Task 0.2。
 
 | 子命令 | 产出 # | 做什么 |
 |---|---|---|
 | `routes` | 1 | 网关路由表（三个出口，按组件是否进外壳分流） |
 | `db-script` | 2, 2b | 建库脚本：`DATABASE`/`SCHEMA`/`ROLE`/授权/外壳登录角色 + `bindings` |
 | `features` | 3 | Feature 清单，写进 IAM 适配层的 `enabledComponents` |
-| `shell-config` | 4 | 外壳合并配置：谁进哪个外壳、端口、迁移顺序 |
+| `shell-config` | 4 | 外壳合并配置：谁进哪个外壳、端口、迁移顺序、每个模块自己的 configSchema 解析结果（合并 `brickkit.yaml` 的 `config:` 字面量 + `component.yaml` 的默认值，阶段四附加 Task 0.2 起吸收了原产出 7 的职责） |
 | `gen` | 5, 11 | `brickkit.yaml` 生成（含 slot/channel 校验）+ `authzBundleUrl` 注入 |
 | `registry` | 6 | 校验全局端口册与 schema 册自洽 |
-| `shell-env` | 7 | 每外壳一份环境变量表（最容易被漏掉的一件） |
-| `shell-depends` | 8 | `shell-compose` 的 `depends_on`：外壳之间的启动顺序 |
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
 
-## 现状（阶段三 Task 3）
+## 现状
 
-已实现 5 个：`registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。其余 5 个（`routes`/`features`/`shell-config`/`shell-env`/`shell-depends`）留待各自先决条件成熟（路由设计落地）时再实现。
+`shell-config`（产出 4）已随 `servedBy` 迁移改版，见上方说明。其余命令的现状记录起点是阶段三 Task 3：已实现 `registry check`（产出 6）、`db-script`（产出 2、2b）、`gen`（产出 5，含 `resources[].bindings` 自动挂载）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。`routes`/`features` 仍留待各自先决条件成熟（路由设计落地）时再实现。
 
 ### `permissions`/`data-scopes` 的判据（`internal/authzreg`）
 

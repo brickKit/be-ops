@@ -34,6 +34,17 @@ type componentYAML struct {
 			Port int    `yaml:"port"`
 		} `yaml:"extraPorts"`
 	} `yaml:"deployment"`
+	ConfigSchema struct {
+		Properties map[string]struct {
+			// Default 用指针区分"没写 default 这个键"（nil，比如
+			// iamJwksUrl/authzBundleUrl——没有默认值，只能靠
+			// brickkit.yaml 的 config: 覆盖，缺了就该是"没这个值"）
+			// 与"写了 default: \"\""（非 nil 指向空字符串，比如
+			// otelBaseUrl——空字符串本身就是有意义的默认值，"→
+			// Blackhole Exporter"）。
+			Default *string `yaml:"default"`
+		} `yaml:"properties"`
+	} `yaml:"configSchema"`
 }
 
 // dependencyEntry 兼容两种写法：纯字符串 "mdm/customer@1.0.0"，或
@@ -173,7 +184,66 @@ func loadOne(dir string) (ComponentSpec, bool, error) {
 	for _, r := range comp.Dependencies.Resources {
 		spec.Resources = append(spec.Resources, ResourceDep{Kind: r.Kind, Engine: r.Engine})
 	}
+	for key, prop := range comp.ConfigSchema.Properties {
+		if prop.Default == nil {
+			continue
+		}
+		if spec.ConfigDefaults == nil {
+			spec.ConfigDefaults = map[string]string{}
+		}
+		spec.ConfigDefaults[key] = *prop.Default
+	}
 	return spec, true, nil
+}
+
+// brickkitYAML 只解析 brickkit.yaml 里 shell 装配需要的那一小块——
+// 每个组件条目的 id + config:（阶段四附加 Task 0.2）。不是
+// brickkit.yaml 的完整镜像，其余字段（local/expose/labels……）不关心。
+type brickkitYAML struct {
+	Components []struct {
+		ID     string            `yaml:"id"`
+		Config map[string]string `yaml:"config"`
+	} `yaml:"components"`
+}
+
+// LoadBrickkitConfig 读装配仓库根目录的 brickkit.yaml，返回
+// componentID → config 字面量覆盖的映射。这些值（比如
+// authzBundleUrl/iamJwksUrl）是手写在 brickkit.yaml 里的，不在任何
+// component.yaml/assembly.yaml 里——genyaml.Load 读不到，必须单独
+// 读这一份文件（阶段四附加 Task 0.2 调研记录：这条数据 servedBy 场景下
+// 没有平台产物可以借用，只能自己从两份已知 YAML 合并出来）。
+func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
+	var doc brickkitYAML
+	if err := readYAML(path, &doc); err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[string]string, len(doc.Components))
+	for _, c := range doc.Components {
+		if len(c.Config) == 0 {
+			continue
+		}
+		out[c.ID] = c.Config
+	}
+	return out, nil
+}
+
+// MergeConfig 合并"component.yaml 的默认值"与"brickkit.yaml 的字面量
+// 覆盖"：两边都没有的 key 不出现在结果里；只有默认值的 key 用默认值；
+// brickkit.yaml 写了的 key 覆盖默认值（不管默认值是否存在）。这条合并
+// 规则跟 brickKit 自己的注入引擎对 configSchema 项的既有语义一致——
+// 都是读同一份 brickkit.yaml/component.yaml，不是凭空另算一套。
+func MergeConfig(defaults, overrides map[string]string) map[string]string {
+	if len(defaults) == 0 && len(overrides) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(defaults)+len(overrides))
+	for k, v := range defaults {
+		out[k] = v
+	}
+	for k, v := range overrides {
+		out[k] = v
+	}
+	return out
 }
 
 func readYAML(path string, out any) error {

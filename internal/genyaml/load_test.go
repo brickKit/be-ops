@@ -193,6 +193,115 @@ version: 1.0.13
 	}
 }
 
+// TestLoad_ConfigSchema默认值_只收写了default键的项 是阶段四附加
+// Task 0.2 新增的行为：iamJwksUrl/authzBundleUrl 这类没写 default 的
+// 项不该出现在 ConfigDefaults 里（没有默认值，只能靠 brickkit.yaml
+// 覆盖），otelBaseUrl 写了 default: "" 则必须出现、且值是空字符串——
+// 两者不能混为一谈（nil 指针区分）。
+func TestLoad_ConfigSchema默认值_只收写了default键的项(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "mdm", "customer")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	componentYAML := `
+metadata:
+  id: mdm/customer
+  version: 1.0.7
+configSchema:
+  type: object
+  properties:
+    pgSchema:
+      type: string
+      default: mdm_customer
+    otelBaseUrl:
+      type: string
+      default: ""
+    iamJwksUrl:
+      type: string
+`
+	if err := os.WriteFile(filepath.Join(dir, "component.yaml"), []byte(componentYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assembly.yaml"), []byte("id: mdm/customer\nversion: 1.0.7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	specs, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := specs[0]
+	if s.ConfigDefaults["pgSchema"] != "mdm_customer" {
+		t.Fatalf("pgSchema 默认值解析不对：%+v", s.ConfigDefaults)
+	}
+	otelVal, otelOK := s.ConfigDefaults["otelBaseUrl"]
+	if !otelOK || otelVal != "" {
+		t.Fatalf("otelBaseUrl 写了 default:\"\"，应该以空字符串出现在结果里，实际 ok=%v val=%q", otelOK, otelVal)
+	}
+	if _, ok := s.ConfigDefaults["iamJwksUrl"]; ok {
+		t.Fatalf("iamJwksUrl 没写 default 键，不应该出现在 ConfigDefaults 里：%+v", s.ConfigDefaults)
+	}
+}
+
+func TestLoadBrickkitConfig_读组件的config字面量覆盖(t *testing.T) {
+	root := t.TempDir()
+	content := `
+components:
+  - id: mdm/customer
+    version: 1.0.7
+    local: true
+    localPort: 8080
+    expose: true
+    config:
+      authzBundleUrl: "http://host.docker.internal:8223/authz/bundle"
+      iamJwksUrl: "http://host.docker.internal:8200/.well-known/jwks.json"
+  - id: infra/bff-mobile
+    version: 1.0.17
+`
+	path := filepath.Join(root, "brickkit.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadBrickkitConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg) != 1 {
+		t.Fatalf("只有 mdm/customer 写了 config:，期望结果只有 1 条，得到 %d：%+v", len(cfg), cfg)
+	}
+	if cfg["mdm/customer"]["authzBundleUrl"] != "http://host.docker.internal:8223/authz/bundle" {
+		t.Fatalf("authzBundleUrl 解析不对：%+v", cfg["mdm/customer"])
+	}
+	if _, ok := cfg["infra/bff-mobile"]; ok {
+		t.Fatalf("没写 config: 的组件不该出现在结果里：%+v", cfg)
+	}
+}
+
+func TestMergeConfig_覆盖优先于默认值(t *testing.T) {
+	defaults := map[string]string{"pgSchema": "mdm_customer", "otelBaseUrl": ""}
+	overrides := map[string]string{"authzBundleUrl": "http://x", "otelBaseUrl": "http://otel"}
+
+	merged := MergeConfig(defaults, overrides)
+
+	if merged["pgSchema"] != "mdm_customer" {
+		t.Fatalf("只有默认值的 key 应该保留默认值：%+v", merged)
+	}
+	if merged["authzBundleUrl"] != "http://x" {
+		t.Fatalf("只有覆盖值的 key 应该用覆盖值：%+v", merged)
+	}
+	if merged["otelBaseUrl"] != "http://otel" {
+		t.Fatalf("两边都有时覆盖值应该赢：%+v", merged)
+	}
+}
+
+func TestMergeConfig_两边都空返回nil(t *testing.T) {
+	if got := MergeConfig(nil, nil); got != nil {
+		t.Fatalf("两边都空应该返回 nil，得到 %+v", got)
+	}
+}
+
 func TestLoad_目录为空返回空列表不报错(t *testing.T) {
 	specs, err := Load(t.TempDir())
 	if err != nil {

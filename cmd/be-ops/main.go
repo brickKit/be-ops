@@ -22,9 +22,7 @@ var subcommands = map[string]string{
 	"features":      "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
 	"permissions":   "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
 	"data-scopes":   "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
-	"shell-config":  "产出外壳合并配置：谁进哪个外壳、端口、迁移顺序（产出 4）",
-	"shell-env":     "产出每外壳一份环境变量表（产出 7）——最容易被漏掉的一件",
-	"shell-depends": "产出 shell-compose 的 depends_on：外壳之间的启动顺序（产出 8）",
+	"shell-config": "产出外壳合并配置：谁进哪个外壳、端口、迁移顺序、configSchema 值（产出 4，阶段四附加 Task 0.2 起吸收了原产出 7 的职责）",
 }
 
 func main() {
@@ -47,10 +45,6 @@ func main() {
 		err = runDataScopes(os.Args[2:])
 	case "shell-config":
 		err = runShellConfig(os.Args[2:])
-	case "shell-env":
-		err = runShellEnv(os.Args[2:])
-	case "shell-depends":
-		err = runShellDepends(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)

@@ -147,6 +147,26 @@ func TestGen_模块字段原样转发端口与schema(t *testing.T) {
 	}
 }
 
+// TestGen_模块字段原样转发Config 是阶段四附加 Task 0.2 新增的断言：
+// Config 是调用方（cmd/be-ops/shell.go）用 genyaml.MergeConfig 算好的
+// 最终结果，本包只原样转发，不重新合并、不丢字段。
+func TestGen_模块字段原样转发Config(t *testing.T) {
+	s := mod("mdm/customer", "go-shell-core", 8080)
+	s.Config = map[string]string{"pgSchema": "mdm_customer", "otelBaseUrl": ""}
+
+	shells, err := Gen([]genyaml.ComponentSpec{s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := shells[0].Modules[0]
+	if m.Config["pgSchema"] != "mdm_customer" {
+		t.Fatalf("Config 没有原样转发：%+v", m.Config)
+	}
+	if v, ok := m.Config["otelBaseUrl"]; !ok || v != "" {
+		t.Fatalf("Config 里写了空字符串的 key 也应该保留，实际 ok=%v v=%q", ok, v)
+	}
+}
+
 func idsOf(modules []Module) []string {
 	out := make([]string, len(modules))
 	for i, m := range modules {
