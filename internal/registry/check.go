@@ -20,14 +20,22 @@ func Check(ports []PortRow, schemas []SchemaRow) []string {
 	return errs
 }
 
-// checkComponentCount ports.tsv 里非 _infra- 前缀的行必须正好 62 行
-// （设计书附录 H）。
+// checkComponentCount ports.tsv 里非 _infra-/_shell- 前缀的行必须正好
+// 62 行（设计书附录 H）。
+//
+// `_shell-` 前缀（阶段四附加 Task 0.4 新增）跟 `_infra-` 的豁免理由不
+// 一样，不能合并成一条注释：`_infra-` 是"根本不是 brickKit 组件"（带外
+// 容器），`_shell-` 是"是真实 brickKit 组件（servedBy 落地后外壳本身
+// 也要有一份 component.yaml），但不属于设计书 62 个业务组件的固定名录
+// "——外壳是部署层的基础设施单元，不是一个业务域组件，计入 62 会让这条
+// 校验的含义（"62 个业务组件的端口都分配好了吗"）失真。
 func checkComponentCount(ports []PortRow) []string {
 	n := 0
 	for _, p := range ports {
-		if !strings.HasPrefix(p.Repo, "_infra-") {
-			n++
+		if strings.HasPrefix(p.Repo, "_infra-") || strings.HasPrefix(p.Repo, "_shell-") {
+			continue
 		}
+		n++
 	}
 	if n != 62 {
 		return []string{fmt.Sprintf("ports.tsv 里的组件行数是 %d，应为 62（设计书附录 H）", n)}

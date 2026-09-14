@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -127,5 +128,25 @@ func TestCheck_组件数不对62报错(t *testing.T) {
 	errs := Check(ports, nil)
 	if !containsSubstr(errs, "62") {
 		t.Fatalf("组件行数不是 62 应该报错，实际：%v", errs)
+	}
+}
+
+// TestCheck_shell前缀不计入62组件数 是阶段四附加 Task 0.4 新增的行为：
+// 外壳自己（servedBy 落地后也要有一份 component.yaml）不属于设计书 62
+// 个业务组件的固定名录，`_shell-` 前缀的行必须跟 `_infra-` 一样被
+// checkComponentCount 豁免，不能让外壳落地反而把这条校验拖红。
+func TestCheck_shell前缀不计入62组件数(t *testing.T) {
+	ports := make([]PortRow, 0, 66)
+	for i := range 62 {
+		ports = append(ports, PortRow{Repo: fmt.Sprintf("fake-%d", i), HTTPPort: fmt.Sprintf("%d", 9000+i), GRPCPort: "-"})
+	}
+	ports = append(ports,
+		PortRow{Repo: "_shell-go-core", HTTPPort: "8090", GRPCPort: "-"},
+		PortRow{Repo: "_shell-go-backoffice", HTTPPort: "8116", GRPCPort: "-"},
+		PortRow{Repo: "_shell-go-infra", HTTPPort: "8224", GRPCPort: "-"},
+		PortRow{Repo: "_shell-py-render", HTTPPort: "8402", GRPCPort: "-"},
+	)
+	if errs := checkComponentCount(ports); len(errs) != 0 {
+		t.Fatalf("62 个真实组件 + 4 个 _shell- 行不该报组件数错误，实际：%v", errs)
 	}
 }
