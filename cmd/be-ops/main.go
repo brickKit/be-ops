@@ -13,17 +13,20 @@ import (
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
-// be-ops 认领平台明确不做的 11 个产出（总纲 §2.4、设计书决策 89/93）。
-// 它不是 brickKit 组件，不进 brickkit.yaml。
+// be-ops 认领平台明确不做的产出（总纲 §2.4、设计书决策 89/93）——固定编号
+// "11 个"，不是这张表现在还剩的项数：产出 4/7/8（外壳合并专用）已经随
+// brickKit 自己的 servedBy 机制陆续长出原生能力、一个个退休（最后一个
+// "shell-config" 子命令在阶段四附加 Task 0.6 一并删除），完整过程见
+// 装配仓库 docs/plans/04b-验证记录.md。编号不重排，因为 registry/*.tsv
+// 等别处按编号引用产出 9/10。它不是 brickKit 组件，不进 brickkit.yaml。
 var subcommands = map[string]string{
-	"registry":      "校验全局端口册与 schema 册自洽（产出 6）",
-	"db-script":     "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
-	"gen":           "产出 brickkit.yaml，含 slot 互斥与 channel 多选校验（产出 5）",
-	"routes":        "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
-	"features":      "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
-	"permissions":   "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
-	"data-scopes":   "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
-	"shell-config": "产出外壳合并配置：谁进哪个外壳、端口、迁移顺序、configSchema 值（产出 4，阶段四附加 Task 0.2 起吸收了原产出 7 的职责）",
+	"registry":    "校验全局端口册与 schema 册自洽（产出 6）",
+	"db-script":   "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
+	"gen":         "产出 brickkit.yaml，含 slot 互斥与 channel 多选校验（产出 5）",
+	"routes":      "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
+	"features":    "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
+	"permissions": "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
+	"data-scopes": "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
 }
 
 func main() {
@@ -44,8 +47,6 @@ func main() {
 		err = runPermissions(os.Args[2:])
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
-	case "shell-config":
-		err = runShellConfig(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)

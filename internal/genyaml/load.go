@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,17 +34,6 @@ type componentYAML struct {
 			Port int    `yaml:"port"`
 		} `yaml:"extraPorts"`
 	} `yaml:"deployment"`
-	ConfigSchema struct {
-		Properties map[string]struct {
-			// Default 用指针区分"没写 default 这个键"（nil，比如
-			// iamJwksUrl/authzBundleUrl——没有默认值，只能靠
-			// brickkit.yaml 的 config: 覆盖，缺了就该是"没这个值"）
-			// 与"写了 default: \"\""（非 nil 指向空字符串，比如
-			// otelBaseUrl——空字符串本身就是有意义的默认值，"→
-			// Blackhole Exporter"）。
-			Default *string `yaml:"default"`
-		} `yaml:"properties"`
-	} `yaml:"configSchema"`
 }
 
 // dependencyEntry 兼容两种写法：纯字符串 "mdm/customer@1.0.0"，或
@@ -187,142 +173,7 @@ func loadOne(dir string) (ComponentSpec, bool, error) {
 	for _, r := range comp.Dependencies.Resources {
 		spec.Resources = append(spec.Resources, ResourceDep{Kind: r.Kind, Engine: r.Engine})
 	}
-	for key, prop := range comp.ConfigSchema.Properties {
-		if prop.Default == nil {
-			continue
-		}
-		if spec.ConfigDefaults == nil {
-			spec.ConfigDefaults = map[string]string{}
-		}
-		spec.ConfigDefaults[key] = *prop.Default
-	}
 	return spec, true, nil
-}
-
-// brickkitYAML 只解析 brickkit.yaml 里 shell 装配需要的那一小块——
-// 每个组件条目的 id + config:（阶段四附加 Task 0.2）。不是
-// brickkit.yaml 的完整镜像，其余字段（local/expose/labels……）不关心。
-type brickkitYAML struct {
-	Components []struct {
-		ID     string            `yaml:"id"`
-		Config map[string]string `yaml:"config"`
-	} `yaml:"components"`
-}
-
-// LoadBrickkitConfig 读装配仓库根目录的 brickkit.yaml，返回
-// componentID → config 字面量覆盖的映射。这些值（比如
-// authzBundleUrl/iamJwksUrl）是手写在 brickkit.yaml 里的，不在任何
-// component.yaml/assembly.yaml 里——genyaml.Load 读不到，必须单独
-// 读这一份文件（阶段四附加 Task 0.2 调研记录：这条数据 servedBy 场景下
-// 没有平台产物可以借用，只能自己从两份已知 YAML 合并出来）。
-//
-// ⚠️ 故意不展开 `${VAR}` 占位符（`appTokenSigningKeyPem:
-// "${APP_TOKEN_SIGNING_KEY_PEM}"` 这类写法在这里原样返回）——真机试过
-// 在这里展开，两个真实问题都踩到了：①展开后的真实密钥会被 `be-ops
-// shell-config` 写进 `brickkit.yaml` 的 `shellConfigJson` 字面量，而
-// 那份文件要提交进 git，等于把真实密钥永久写进仓库历史；②即使不提交，
-// 这些密钥（比如 appTokenSigningKeyPem）原始就带着真实换行符，直接
-// substitute 进本该是单行 JSON 文本的字符串里会破坏 JSON 结构本身。
-// 正确做法是让这类值完全不进入 `MergeConfig` 的返回结果（见该函数的
-// "纯 ${VAR} 占位符整体排除" 那段），改成外壳自己 component.yaml 上的
-// 一个独立 configSchema 项，交给 brickKit 原生的注入/展开机制处理（那
-// 条路径展开的是一个干净的 YAML 标量值，不是塞在别的字符串里面的子串，
-// 不会有上述两个问题）——本函数因此保持"纯字面量透传"，不做任何展开。
-func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
-	var doc brickkitYAML
-	if err := readYAML(path, &doc); err != nil {
-		return nil, err
-	}
-	out := make(map[string]map[string]string, len(doc.Components))
-	for _, c := range doc.Components {
-		if len(c.Config) == 0 {
-			continue
-		}
-		out[c.ID] = c.Config
-	}
-	return out, nil
-}
-
-// envPlaceholderRe 匹配"整个值就是一个 ${ENV_VAR} 引用"（不是"值里面
-// 混了一段 ${VAR}"）——跟 brickKit internal/config/parse.go 的 envVarRe
-// 认的是同一种 `${字母/下划线开头，后接字母数字下划线}` 形状，只是这里
-// 额外要求首尾锚定（`^...$`），见 MergeConfig 排除这类值的理由。
-var envPlaceholderRe = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
-
-// MergeConfig 合并"component.yaml 的默认值"与"brickkit.yaml 的字面量
-// 覆盖"：两边都没有的 key 不出现在结果里；只有默认值的 key 用默认值；
-// brickkit.yaml 写了的 key 覆盖默认值（不管默认值是否存在）。这条合并
-// 规则跟 brickKit 自己的注入引擎对 configSchema 项的既有语义一致——
-// 都是读同一份 brickkit.yaml/component.yaml，不是凭空另算一套。
-//
-// ⚠️ 阶段四附加 Task 0.4 真机复现过的第一个真实 bug：结果的 key 必须转成
-// SCREAMING_SNAKE_CASE（"defaultWarehouseId" → "DEFAULT_WAREHOUSE_ID"），
-// 不能保留 component.yaml 里写的原始 camelCase——`besdk.Config`（模块
-// 代码读配置唯一入口）的 String/MustString 内部会把调用方传的 key 转成
-// SCREAMING_SNAKE_CASE 再去查表，因为 brickKit 自己的注入引擎
-// （internal/inject.Build）就是把 configSchema 每一项转成这个形状才写
-// 进真实容器环境变量的（"pgSchema" → "PG_SCHEMA"）。这里如果直接原样
-// 转发 camelCase key，`rt.Config.String("pgSchema")` 转完查的是
-// "PG_SCHEMA"，表里却只有 "pgSchema"，查不到——有 default 的项静默退化
-// 成默认值（不报错，行为却是错的，同十七条第 6 条"配置项被跳过只报警告"
-// 那一类坑），没有 default、用 MustString 的项直接 panic 崩容器（真机
-// 是被 erp/sales 的 defaultWarehouseId 第一次真的暴露出来的——它是全项目
-// 唯一一个没写 default、真的用 MustString 的必填项）。转换算法跟
-// brickKit `internal/inject/reserved.go` 的 EnvVarName 逐字一致（两个
-// 独立 Go module 之间不能互相 import，只能各自实现并保持算法同步，
-// 同 be-sdk-go `configEnvVarName` 的既有先例）。
-//
-// ⚠️ 真机复现过的第二个真实 bug：合并后整个值恰好是一个 `${VAR}` 占位符
-// 的 key（比如 `appTokenSigningKeyPem: "${APP_TOKEN_SIGNING_KEY_PEM}"`）
-// 必须从结果里整条排除，不能连占位符字符串一起转发——这类值本来就是
-// 秘钥（PEM/密码/webhook 共享密钥），排除的理由见 LoadBrickkitConfig
-// 顶部注释：真机测过让它流进 `shellConfigJson`，不管展不展开都会出真
-// 问题。排除之后这些 key 需要改成外壳自己 component.yaml 上的独立
-// configSchema 项，由 `shells/go`/`shells/python` 在装配某个模块时从
-// 外壳自己的进程环境兜底读取（`internal/shell.envWithProcessFallback`
-// 及其 Python 对应实现），不再经过这里。
-func MergeConfig(defaults, overrides map[string]string) map[string]string {
-	if len(defaults) == 0 && len(overrides) == 0 {
-		return nil
-	}
-	merged := make(map[string]string, len(defaults)+len(overrides))
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	for k, v := range overrides {
-		merged[k] = v
-	}
-	out := make(map[string]string, len(merged))
-	for k, v := range merged {
-		if envPlaceholderRe.MatchString(v) {
-			continue
-		}
-		out[configEnvVarName(k)] = v
-	}
-	return out
-}
-
-// configEnvVarName 把 configSchema 属性名（camelCase，如 "pgSchema"）转成
-// 平台注入环境变量时真正用的名字（SCREAMING_SNAKE_CASE，如 "PG_SCHEMA"）
-// ——算法与 brickKit `internal/inject/reserved.go` 的 EnvVarName、
-// be-sdk-go 的 configEnvVarName 逐字一致，见 MergeConfig 的注释。
-func configEnvVarName(key string) string {
-	var b strings.Builder
-	runes := []rune(key)
-	for i, r := range runes {
-		switch {
-		case r == '-' || r == '.' || r == ' ':
-			b.WriteRune('_')
-		case unicode.IsUpper(r):
-			if i > 0 && (unicode.IsLower(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
-				b.WriteRune('_')
-			}
-			b.WriteRune(r)
-		default:
-			b.WriteRune(unicode.ToUpper(r))
-		}
-	}
-	return b.String()
 }
 
 func readYAML(path string, out any) error {

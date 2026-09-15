@@ -44,30 +44,14 @@ type ComponentSpec struct {
 	LocalPort int
 
 	// Port/ExtraPorts 是 component.yaml 的 deployment.port/extraPorts 原样
-	// 保留——LocalPort 由它推导，产出 4（合并清单）也要用它给外壳里的每个
-	// 模块分端口，不重新发明一份端口来源。
+	// 保留——LocalPort 由它推导，不重新发明一份端口来源。
 	Port       int
 	ExtraPorts map[string]int
 
-	// Schema/Role 是 assembly.yaml 的 data.schema/data.role——产出 4 用它
-	// 给每个模块的迁移拼 schema，产出 7 判断"这条依赖是不是也在合并态"
-	// 时同样要核对对方的 Shell，但 Schema/Role 是"这个组件自己"的身份。
+	// Schema/Role 是 assembly.yaml 的 data.schema/data.role——"这个组件
+	// 自己"的数据身份。
 	Schema string
 	Role   string
-
-	// ConfigDefaults 是 component.yaml 的 configSchema.properties.<key>.default
-	// 原样保留——只收"写了 default 这个键"的项，没写的（比如
-	// iamJwksUrl/authzBundleUrl）不出现在这个 map 里，与"写了空字符串
-	// 默认值"（比如 otelBaseUrl）区分开（阶段四附加 Task 0.2）。
-	ConfigDefaults map[string]string
-
-	// Config 是 ConfigDefaults 与 brickkit.yaml 的 config: 字面量覆盖
-	// 合并后的最终结果（genyaml.MergeConfig 算出来，调用方——
-	// cmd/be-ops/shell.go 的 runShellConfig——在 Load 之后单独赋值，
-	// loadOne 不填这个字段：它只读得到 component.yaml/assembly.yaml，
-	// 读不到 brickkit.yaml）。产出 4 的 shellconfig.Gen 直接转发这个
-	// 字段给 Module.Config。
-	Config map[string]string
 }
 
 var exactVersionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
