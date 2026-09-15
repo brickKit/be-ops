@@ -216,19 +216,18 @@ type brickkitYAML struct {
 // 读这一份文件（阶段四附加 Task 0.2 调研记录：这条数据 servedBy 场景下
 // 没有平台产物可以借用，只能自己从两份已知 YAML 合并出来）。
 //
-// ⚠️ 阶段四附加 Task 0.4 真机复现过的第二个真实 bug：`brickkit.yaml`
-// 里像 `appTokenSigningKeyPem: "${APP_TOKEN_SIGNING_KEY_PEM}"` 这种
-// `${VAR}` 写法是留给 brickKit 自己的注入引擎在生成阶段展开的（真实
-// 密钥来自调用方的进程环境/`.env`），本函数只是纯 YAML 解析，原样返回
-// 字面量字符串——如果不在这里也展开一遍，`SHELL_CONFIG_JSON` 里灌进去
-// 的就是这串 `${VAR}` 占位符本身，而不是真实密钥，`infra-iam-casdoor`/
-// `integration-im-dingtalk` 在外壳里读到的会是这串没意义的占位符，不是
-// 真机能立刻看出来的报错（appTokenSigningKeyPem 校验 PEM 格式时才会
-// 间接暴露）。展开算法（正则、`os.LookupEnv` 查不到就保留原样不报错）
-// 与 brickKit `internal/config/parse.go` 的 `ExpandEnv` 逐字一致——
-// 调用方（`be-ops shell-config`）因此要求跟 brickKit 本身同样的前提：
-// 运行前先 `set -a; source .env; set +a`，不能默认这里能连到某个专门
-// 的密钥存储。
+// ⚠️ 故意不展开 `${VAR}` 占位符（`appTokenSigningKeyPem:
+// "${APP_TOKEN_SIGNING_KEY_PEM}"` 这类写法在这里原样返回）——真机试过
+// 在这里展开，两个真实问题都踩到了：①展开后的真实密钥会被 `be-ops
+// shell-config` 写进 `brickkit.yaml` 的 `shellConfigJson` 字面量，而
+// 那份文件要提交进 git，等于把真实密钥永久写进仓库历史；②即使不提交，
+// 这些密钥（比如 appTokenSigningKeyPem）原始就带着真实换行符，直接
+// substitute 进本该是单行 JSON 文本的字符串里会破坏 JSON 结构本身。
+// 正确做法是让这类值完全不进入 `MergeConfig` 的返回结果（见该函数的
+// "纯 ${VAR} 占位符整体排除" 那段），改成外壳自己 component.yaml 上的
+// 一个独立 configSchema 项，交给 brickKit 原生的注入/展开机制处理（那
+// 条路径展开的是一个干净的 YAML 标量值，不是塞在别的字符串里面的子串，
+// 不会有上述两个问题）——本函数因此保持"纯字面量透传"，不做任何展开。
 func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
 	var doc brickkitYAML
 	if err := readYAML(path, &doc); err != nil {
@@ -239,36 +238,16 @@ func LoadBrickkitConfig(path string) (map[string]map[string]string, error) {
 		if len(c.Config) == 0 {
 			continue
 		}
-		expanded := make(map[string]string, len(c.Config))
-		for k, v := range c.Config {
-			expanded[k] = expandEnv(v)
-		}
-		out[c.ID] = expanded
+		out[c.ID] = c.Config
 	}
 	return out, nil
 }
 
-// envVarRe 匹配 ${ENV_VAR} 引用，与 brickKit internal/config/parse.go 的
-// envVarRe 逐字一致（两个独立 Go module 之间不能互相 import，只能各自
-// 实现并保持算法同步）。
-var envVarRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-
-// expandEnv 把字符串里的 ${ENV_VAR} 替换成环境变量的值，查不到就保留
-// 原样（不报错，也不替换成空字符串）——跟 brickKit 的 ExpandEnv 同样的
-// 语义，让漏配的变量在生成结果里一眼看得出来，而不是被替换掉之后凭空
-// 消失。
-func expandEnv(s string) string {
-	if !strings.Contains(s, "${") {
-		return s
-	}
-	return envVarRe.ReplaceAllStringFunc(s, func(match string) string {
-		name := match[2 : len(match)-1]
-		if value, ok := os.LookupEnv(name); ok {
-			return value
-		}
-		return match
-	})
-}
+// envPlaceholderRe 匹配"整个值就是一个 ${ENV_VAR} 引用"（不是"值里面
+// 混了一段 ${VAR}"）——跟 brickKit internal/config/parse.go 的 envVarRe
+// 认的是同一种 `${字母/下划线开头，后接字母数字下划线}` 形状，只是这里
+// 额外要求首尾锚定（`^...$`），见 MergeConfig 排除这类值的理由。
+var envPlaceholderRe = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
 
 // MergeConfig 合并"component.yaml 的默认值"与"brickkit.yaml 的字面量
 // 覆盖"：两边都没有的 key 不出现在结果里；只有默认值的 key 用默认值；
@@ -276,7 +255,7 @@ func expandEnv(s string) string {
 // 规则跟 brickKit 自己的注入引擎对 configSchema 项的既有语义一致——
 // 都是读同一份 brickkit.yaml/component.yaml，不是凭空另算一套。
 //
-// ⚠️ 阶段四附加 Task 0.4 真机复现过的一个真实 bug：结果的 key 必须转成
+// ⚠️ 阶段四附加 Task 0.4 真机复现过的第一个真实 bug：结果的 key 必须转成
 // SCREAMING_SNAKE_CASE（"defaultWarehouseId" → "DEFAULT_WAREHOUSE_ID"），
 // 不能保留 component.yaml 里写的原始 camelCase——`besdk.Config`（模块
 // 代码读配置唯一入口）的 String/MustString 内部会把调用方传的 key 转成
@@ -292,6 +271,16 @@ func expandEnv(s string) string {
 // brickKit `internal/inject/reserved.go` 的 EnvVarName 逐字一致（两个
 // 独立 Go module 之间不能互相 import，只能各自实现并保持算法同步，
 // 同 be-sdk-go `configEnvVarName` 的既有先例）。
+//
+// ⚠️ 真机复现过的第二个真实 bug：合并后整个值恰好是一个 `${VAR}` 占位符
+// 的 key（比如 `appTokenSigningKeyPem: "${APP_TOKEN_SIGNING_KEY_PEM}"`）
+// 必须从结果里整条排除，不能连占位符字符串一起转发——这类值本来就是
+// 秘钥（PEM/密码/webhook 共享密钥），排除的理由见 LoadBrickkitConfig
+// 顶部注释：真机测过让它流进 `shellConfigJson`，不管展不展开都会出真
+// 问题。排除之后这些 key 需要改成外壳自己 component.yaml 上的独立
+// configSchema 项，由 `shells/go`/`shells/python` 在装配某个模块时从
+// 外壳自己的进程环境兜底读取（`internal/shell.envWithProcessFallback`
+// 及其 Python 对应实现），不再经过这里。
 func MergeConfig(defaults, overrides map[string]string) map[string]string {
 	if len(defaults) == 0 && len(overrides) == 0 {
 		return nil
@@ -305,6 +294,9 @@ func MergeConfig(defaults, overrides map[string]string) map[string]string {
 	}
 	out := make(map[string]string, len(merged))
 	for k, v := range merged {
+		if envPlaceholderRe.MatchString(v) {
+			continue
+		}
 		out[configEnvVarName(k)] = v
 	}
 	return out

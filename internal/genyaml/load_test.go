@@ -279,13 +279,15 @@ components:
 	}
 }
 
-// TestLoadBrickkitConfig_展开VAR占位符 是阶段四附加 Task 0.4 真机复现出
-// 的第二个真实 bug 的回归测试：brickkit.yaml 里 ${APP_TOKEN_SIGNING_KEY_PEM}
-// 这类写法留给 brickKit 自己的注入引擎在生成阶段展开，本函数原来只是
-// 纯 YAML 解析、原样返回字面量——SHELL_CONFIG_JSON 里灌进去的会是这串
-// 占位符本身，不是真实密钥。查不到对应环境变量时必须保留原样（不报错、
-// 不替换成空字符串），跟 brickKit 的 ExpandEnv 同样的语义。
-func TestLoadBrickkitConfig_展开VAR占位符(t *testing.T) {
+// TestLoadBrickkitConfig_不展开VAR占位符 是阶段四附加 Task 0.4 真机复现出
+// 的第二个真实 bug 的回归测试（回归的方向跟一开始的直觉相反）：一度以为
+// 这里应该展开 ${VAR}，真机测过之后发现两个更严重的问题——①展开出来的
+// 真实密钥会被 be-ops shell-config 写进要提交进 git 的 brickkit.yaml 里；
+// ②即使不提交，密钥（比如 appTokenSigningKeyPem）自带真实换行符，直接
+// substitute 进本该是单行 JSON 文本的字符串会破坏 JSON 结构。正确做法
+// 是这里永远不展开、原样返回字面量，让这类值在 MergeConfig 那一步被整条
+// 排除（见该函数注释），改走外壳自己 configSchema 的独立项这条路。
+func TestLoadBrickkitConfig_不展开VAR占位符(t *testing.T) {
 	t.Setenv("FAKE_SECRET_FOR_TEST", "真实密钥内容")
 
 	root := t.TempDir()
@@ -295,7 +297,6 @@ components:
     version: 1.0.7
     config:
       appTokenSigningKeyPem: "${FAKE_SECRET_FOR_TEST}"
-      casdoorBaseUrl: "${THIS_VAR_DOES_NOT_EXIST}"
 `
 	path := filepath.Join(root, "brickkit.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -306,11 +307,8 @@ components:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg["infra/iam-casdoor"]["appTokenSigningKeyPem"]; got != "真实密钥内容" {
-		t.Fatalf("${FAKE_SECRET_FOR_TEST} 应该展开成真实环境变量的值，实际 %q", got)
-	}
-	if got := cfg["infra/iam-casdoor"]["casdoorBaseUrl"]; got != "${THIS_VAR_DOES_NOT_EXIST}" {
-		t.Fatalf("查不到的环境变量应该保留原样，不能报错也不能变成空字符串，实际 %q", got)
+	if got := cfg["infra/iam-casdoor"]["appTokenSigningKeyPem"]; got != "${FAKE_SECRET_FOR_TEST}" {
+		t.Fatalf("即使环境变量真的存在，这里也不应该展开，应该原样返回占位符字符串，实际 %q", got)
 	}
 }
 
@@ -359,6 +357,32 @@ func TestMergeConfig_key转成SCREAMING_SNAKE_CASE(t *testing.T) {
 	}
 	if _, ok := merged["defaultWarehouseId"]; ok {
 		t.Fatalf("原始 camelCase key 不应该还留在结果里：%+v", merged)
+	}
+}
+
+// TestMergeConfig_整个值是VAR占位符的key被整条排除 是阶段四附加
+// Task 0.4 真机复现出的第二个真实 bug 的回归测试：秘钥类的值
+// （appTokenSigningKeyPem 等）合并后如果整个值就是一个 ${VAR} 占位符，
+// 必须从结果里整条排除，不能让这类值流进 shellConfigJson——真机测过
+// 两种后果都是真实存在的（写进要提交的 brickkit.yaml 里 / 破坏 JSON
+// 结构），完整原因见 LoadBrickkitConfig 与 MergeConfig 本体的注释。
+func TestMergeConfig_整个值是VAR占位符的key被整条排除(t *testing.T) {
+	defaults := map[string]string{"pgSchema": "infra_iam_casdoor"}
+	overrides := map[string]string{
+		"appTokenSigningKeyPem": "${APP_TOKEN_SIGNING_KEY_PEM}",
+		"casdoorBaseUrl":        "http://host.docker.internal:8000", // 不是占位符，正常保留
+	}
+
+	merged := MergeConfig(defaults, overrides)
+
+	if _, ok := merged["APP_TOKEN_SIGNING_KEY_PEM"]; ok {
+		t.Fatalf("整个值是 ${VAR} 占位符的 key 应该被排除，实际还在结果里：%+v", merged)
+	}
+	if merged["PG_SCHEMA"] != "infra_iam_casdoor" {
+		t.Fatalf("不是占位符的 key 不该被误伤：%+v", merged)
+	}
+	if merged["CASDOOR_BASE_URL"] != "http://host.docker.internal:8000" {
+		t.Fatalf("不是占位符的 key 不该被误伤：%+v", merged)
 	}
 }
 
