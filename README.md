@@ -4,7 +4,7 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 
 ## 11 个产出（编号固定），7 个子命令
 
-⚠️ **产出 4（外壳合并配置）、产出 7（每外壳环境变量表）、产出 8（`shell-compose` 的 `depends_on`）已全部退休**——三者都是合并部署专用，随着 brickKit 自己的 `servedBy` 机制陆续长出原生能力，一个个被取代：产出 7/8 在 `servedBy` 迁移（阶段四附加 Task 0.2/0.3、0.5）里退休，"依赖地址改写"/外壳间启动顺序改由 brickKit 原生计算；产出 4（`shell-config` 子命令，曾经吸收了产出 7 剩下的"传 configSchema 解析结果"职责）在阶段四附加 Task 0.6 里最后退休——brickKit v0.4.2 新增 `BRICKKIT_SERVED_MEMBERS_CONFIG` 原生环境变量，外壳启动器直接解析它，不再需要这条命令生成一份平行数据。**编号保持不变，不重排**（`permissions`/`data-scopes` 仍按产出 9/10 引用）。完整调研过程见装配仓库 `docs/plans/04b-验证记录.md` Task 0.2/0.5/0.6。
+⚠️ **产出 4（外壳合并配置）、产出 7（每外壳环境变量表）、产出 8（`shell-compose` 的 `depends_on`）已全部退休**——三者都是合并部署专用，随着 brickKit 自己的 `servedBy` 机制陆续长出原生能力，一个个被取代：产出 7/8 在 `servedBy` 迁移（阶段四附加 Task 0.2/0.3、0.5）里退休，"依赖地址改写"/外壳间启动顺序改由 brickKit 原生计算；产出 4（`shell-config` 子命令，曾经吸收了产出 7 剩下的"传 configSchema 解析结果"职责）在阶段四附加 Task 0.6 里最后退休——brickKit v0.4.2 新增 `BRICKKIT_SERVED_MEMBERS_CONFIG` 原生环境变量，外壳启动器直接解析它，不再需要这条命令生成一份平行数据。**编号保持不变，不重排**（`permissions`/`data-scopes` 仍按产出 9/10 引用）。完整调研过程见装配仓库 `docs/plans/05a-迁移到servedBy.md` Task 0.2/0.5/0.6。
 
 | 子命令 | 产出 # | 做什么 |
 |---|---|---|
