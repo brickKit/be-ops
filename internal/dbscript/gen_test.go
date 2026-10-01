@@ -241,3 +241,20 @@ func TestGen_未知成员报错并点名(t *testing.T) {
 		t.Fatalf("应报错并点名清单与成员 ID：%v", err)
 	}
 }
+
+func TestGen_组件角色是登录角色且顶层设密码(t *testing.T) {
+	sql, err := Gen([]Row{{Repo: "mdm-customer", Schema: "mdm_customer",
+		Role: "mdm_customer_rw", ShellLoginRole: "shell_go_core"}}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "CREATE ROLE mdm_customer_rw LOGIN") || strings.Contains(sql, "NOLOGIN") {
+		t.Errorf("组件角色应为 LOGIN：\n%s", sql)
+	}
+	if !strings.Contains(sql, "ALTER ROLE mdm_customer_rw LOGIN PASSWORD :'pw_mdm_customer_rw';") {
+		t.Error("应有顶层 ALTER ROLE 设密码并保证 LOGIN")
+	}
+	if DBPasswordEnv("mdm-customer") != "MDM_CUSTOMER_DB_PASSWORD" || DBPasswordEnv("erp-sales") != "ERP_SALES_DB_PASSWORD" {
+		t.Error("环境变量名映射不对")
+	}
+}

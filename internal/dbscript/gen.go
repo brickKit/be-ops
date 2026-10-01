@@ -158,11 +158,17 @@ func Gen(rows []Row, database string, shells []Shell) (string, error) {
 		fmt.Fprintf(&b, "CREATE SCHEMA IF NOT EXISTS %s;\n", archive)
 		fmt.Fprintf(&b, "DO $$ BEGIN\n")
 		fmt.Fprintf(&b, "  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='%s') THEN\n", r.Role)
-		// ⚠️ NOLOGIN：组件角色只用于 SET LOCAL ROLE 切换，从不登录
-		// （§13.3 铁律二）——它不出现在 brickkit.yaml 的资源凭据里。
-		fmt.Fprintf(&b, "    CREATE ROLE %s NOLOGIN;\n", r.Role)
+		// ⚠️ LOGIN：brickKit v1 下独立运行的组件用自己的凭据连 PG
+		// （PG_USER/PG_PASSWORD 配置项，平台不再注入），所以组件角色是它
+		// 独立态的登录角色；合并进外壳后它同时是外壳 SET LOCAL ROLE 的
+		// 目标（§13.3 铁律二）。
+		fmt.Fprintf(&b, "    CREATE ROLE %s LOGIN;\n", r.Role)
 		fmt.Fprintf(&b, "  END IF;\n")
 		fmt.Fprintf(&b, "END $$;\n")
+		// 密码与外壳登录角色同一套做法：顶层 ALTER ROLE（DO 块内 psql 变量
+		// 不替换）。LOGIN 一并重设，让早先建成 NOLOGIN 的旧库也被改过来。
+		// psql 变量 pw_<role> 对应环境变量 <REPO 大写下划线>_DB_PASSWORD。
+		fmt.Fprintf(&b, "ALTER ROLE %s LOGIN PASSWORD :'pw_%s';\n", r.Role, r.Role)
 		// ⚠️ USAGE 与 CREATE 分两条 GRANT，不是一条 "GRANT USAGE, CREATE"——
 		// 这是照测试断言改的（测试要求 "GRANT USAGE ON SCHEMA … TO …" 作为
 		// 独立可搜索的一条），两种写法对 PostgreSQL 语义完全等价。
@@ -200,4 +206,9 @@ func Gen(rows []Row, database string, shells []Shell) (string, error) {
 	}
 
 	return b.String(), nil
+}
+
+// DBPasswordEnv 组件角色密码对应的环境变量名：erp-sales → ERP_SALES_DB_PASSWORD。
+func DBPasswordEnv(repo string) string {
+	return strings.ToUpper(strings.ReplaceAll(repo, "-", "_")) + "_DB_PASSWORD"
 }
