@@ -33,7 +33,7 @@ func LoadShells(root string) ([]Shell, error) {
 		if err := yaml.Unmarshal(raw, &doc); err != nil {
 			return nil, fmt.Errorf("%s：%w", p, err)
 		}
-		sh := Shell{Name: filepath.Base(filepath.Dir(p))}
+		sh := Shell{Name: filepath.Base(filepath.Dir(p)), Manifest: p}
 		for _, m := range doc.Shell.Members {
 			id, _, _ := strings.Cut(m, "@")
 			sh.Members = append(sh.Members, strings.TrimSpace(id))

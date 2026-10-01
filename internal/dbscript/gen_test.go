@@ -121,7 +121,7 @@ func TestGen_非法database名报错(t *testing.T) {
 // 报 "syntax error at or near ":""。这条测试锁死修法：密码只能在顶层
 // ALTER ROLE 里设，不能出现在任何 DO $$ ... $$ 块内部。
 func TestGen_外壳密码不在DO块内部(t *testing.T) {
-	sql, err := Gen(nil, "", nil)
+	sql, err := Gen(nil, "", MergeShells(nil, []string{"go-core"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,8 @@ func TestGen_外壳密码不在DO块内部(t *testing.T) {
 // 但不产出任何成员 GRANT。
 func TestGen_无外壳清单只建登录角色(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "", nil)
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "",
+		MergeShells(nil, ShellNamesFromRepos([]string{"_shell-go-core", "_shell-go-backoffice", "_shell-go-infra", "_shell-py-render", "erp-sales"})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +163,9 @@ func TestGen_无外壳清单只建登录角色(t *testing.T) {
 	if strings.Contains(sql, "shell_py_brain") {
 		t.Error("shell_py_brain 已随旧外壳方案退役")
 	}
+	if strings.Contains(sql, "erp_sales") && strings.Contains(sql, "CREATE ROLE erp_sales LOGIN") {
+		t.Error("非 _shell- 行不该产生登录角色")
+	}
 	if strings.Contains(sql, "GRANT erp_sales_rw TO") {
 		t.Error("没有外壳清单时不该有成员 GRANT")
 	}
@@ -172,7 +176,7 @@ func TestGen_成员GRANT跟随外壳清单(t *testing.T) {
 		{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"},
 		{Repo: "infra-notification", Schema: "infra_notification", Role: "infra_notification_rw", ShellLoginRole: "shell_go_infra"},
 	}, "", []Shell{
-		{Name: "go-core", Members: []string{"erp/sales", "frontend/standard"}},
+		{Name: "go-core", Members: []string{"erp/sales"}},
 		{Name: "go-infra", Members: []string{"infra/notification"}},
 	})
 	if err != nil {
@@ -216,5 +220,24 @@ func TestLoadShells_目录不存在返回空(t *testing.T) {
 	shells, err := LoadShells(t.TempDir())
 	if err != nil || len(shells) != 0 {
 		t.Fatalf("应返回空且不报错：%v %v", shells, err)
+	}
+}
+
+func TestGen_新增_shell行自动多一个登录角色(t *testing.T) {
+	names := ShellNamesFromRepos([]string{"_shell-go-core", "_shell-x"})
+	sql, err := Gen(nil, "", MergeShells(nil, names))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sql, "CREATE ROLE shell_x LOGIN") {
+		t.Errorf("缺少 shell_x：\n%s", sql)
+	}
+}
+
+func TestGen_未知成员报错并点名(t *testing.T) {
+	_, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "",
+		[]Shell{{Name: "go-core", Members: []string{"erp/slaes"}, Manifest: "shell/be/go-core/component.yaml"}})
+	if err == nil || !strings.Contains(err.Error(), "erp/slaes") || !strings.Contains(err.Error(), "shell/be/go-core/component.yaml") {
+		t.Fatalf("应报错并点名清单与成员 ID：%v", err)
 	}
 }

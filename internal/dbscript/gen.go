@@ -23,8 +23,9 @@ type Row struct {
 // Shell 是 shell/be/<name>/component.yaml 读出来的外壳：Name 如 go-core，
 // Members 是成员组件 ID（已去掉 @版本，如 erp/sales）。
 type Shell struct {
-	Name    string
-	Members []string
+	Name     string
+	Members  []string
+	Manifest string // 清单路径，仅用于报错；仅来自 ports.tsv 的外壳为空
 }
 
 // LoginRole 外壳登录角色名：shell_ + 名字里的 - 换成 _（go-core → shell_go_core）。
@@ -39,10 +40,34 @@ func memberRepo(id string) string { return strings.ReplaceAll(id, "/", "-") }
 
 var identRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-// defaultShellNames 是固定的 4 个外壳（阶段 06：go-core / go-infra /
-// go-backoffice / py-render），即使 shell/be/ 下还没有清单也要先建登录
-// 角色；清单里出现的其它外壳会并进来。
-var defaultShellNames = []string{"go-core", "go-backoffice", "go-infra", "py-render"}
+// ShellNamesFromRepos 从 ports.tsv 的 repo 列取 `_shell-<name>` 行得到外壳名
+// （注册册是唯一事实来源：新增 _shell-* 行自动多一个登录角色）。
+func ShellNamesFromRepos(repos []string) []string {
+	var names []string
+	for _, r := range repos {
+		if n, ok := strings.CutPrefix(r, "_shell-"); ok {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// MergeShells 把仅有名字的外壳（来自 ports.tsv）并进清单外壳：同名的保留
+// 清单（带成员），其余补成空成员外壳。
+func MergeShells(shells []Shell, names []string) []Shell {
+	have := map[string]bool{}
+	for _, s := range shells {
+		have[s.Name] = true
+	}
+	out := append([]Shell(nil), shells...)
+	for _, n := range names {
+		if !have[n] {
+			have[n] = true
+			out = append(out, Shell{Name: n})
+		}
+	}
+	return out
+}
 
 // Gen 产出幂等的建库 SQL，分三段：建库 / 外壳登录角色 / 每组件
 // schema+archive+role+授权。
@@ -60,7 +85,7 @@ var defaultShellNames = []string{"go-core", "go-backoffice", "go-infra", "py-ren
 // 重建（已经在 brickkit_db 建过一次，全局可见）；只有 SCHEMA 本身是
 // per-database 对象，必须在每个库里各建一份。
 //
-// shells 是外壳清单；为空时只建登录角色，不产出任何成员 GRANT。
+// shells 是外壳列表；没有成员的外壳只建登录角色，不产出成员 GRANT。
 func Gen(rows []Row, database string, shells []Shell) (string, error) {
 	if database == "" {
 		database = "brickkit_db"
@@ -80,13 +105,9 @@ func Gen(rows []Row, database string, shells []Shell) (string, error) {
 		}
 	}
 
-	// 登录角色 = 默认 4 个 ∪ 清单里的外壳，保持稳定顺序
+	// 登录角色 = shells 里每个外壳一个（调用方已把 ports.tsv 的 _shell-* 并进来）
 	var loginRoles []string
 	seen := map[string]bool{}
-	for _, n := range defaultShellNames {
-		loginRoles = append(loginRoles, loginRoleOf(n))
-		seen[loginRoleOf(n)] = true
-	}
 	for _, sh := range shells {
 		if !seen[sh.LoginRole()] {
 			loginRoles = append(loginRoles, sh.LoginRole())
@@ -171,7 +192,7 @@ func Gen(rows []Row, database string, shells []Shell) (string, error) {
 		for _, m := range sh.Members {
 			role, ok := roleByRepo[memberRepo(m)]
 			if !ok {
-				continue // 无库组件（无 schema 行）不需要 GRANT
+				return "", fmt.Errorf("外壳 %s 的成员 %q 在 schemas.tsv 里没有对应行（清单：%s）——成员 ID 写错了？", sh.Name, m, sh.Manifest)
 			}
 			fmt.Fprintf(&b, "GRANT %s TO %s;\n", role, sh.LoginRole())
 		}

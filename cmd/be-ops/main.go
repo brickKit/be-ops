@@ -141,6 +141,15 @@ func runDBScript(args []string) error {
 	if err != nil {
 		return err
 	}
+	ports, err := registry.LoadPorts(filepath.Join(*root, "registry", "ports.tsv"))
+	if err != nil {
+		return err
+	}
+	repos := make([]string, len(ports))
+	for i, p := range ports {
+		repos[i] = p.Repo
+	}
+	shells = dbscript.MergeShells(shells, dbscript.ShellNamesFromRepos(repos))
 	sql, err := dbscript.Gen(rows, *database, shells)
 	if err != nil {
 		return err
