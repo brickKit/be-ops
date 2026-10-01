@@ -9,7 +9,6 @@ import (
 
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
-	"github.com/brickKit/be-ops/internal/genyaml"
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
@@ -22,7 +21,6 @@ import (
 var subcommands = map[string]string{
 	"registry":    "校验全局端口册与 schema 册自洽（产出 6）",
 	"db-script":   "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
-	"gen":         "产出 brickkit.yaml，含 slot 互斥与 channel 多选校验（产出 5）",
 	"routes":      "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
 	"features":    "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
 	"permissions": "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
@@ -41,8 +39,6 @@ func main() {
 		err = runRegistry(os.Args[2:])
 	case "db-script":
 		err = runDBScript(os.Args[2:])
-	case "gen":
-		err = runGen(os.Args[2:])
 	case "permissions":
 		err = runPermissions(os.Args[2:])
 	case "data-scopes":
@@ -141,45 +137,18 @@ func runDBScript(args []string) error {
 			Repo: s.Repo, Schema: s.Schema, Role: s.Role, ShellLoginRole: s.ShellLoginRole,
 		})
 	}
-	sql, err := dbscript.Gen(rows, *database)
+	shells, err := dbscript.LoadShells(*root)
+	if err != nil {
+		return err
+	}
+	sql, err := dbscript.Gen(rows, *database, shells)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(*out, []byte(sql), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("✓ 建库脚本已产出：%s（%d 个组件，目标库 %s）\n", *out, len(rows), *database)
-	return nil
-}
-
-// runGen 是 "gen --out brickkit.yaml"：扫描 components/ 下所有组件，产出
-// 装配清单（产出 5）。components/ 里有什么就装什么——「没买」的正确做法
-// 是从源头不把那个组件的 submodule 加进来，不是这里再过滤一次购买清单
-// （决策 98）。
-func runGen(args []string) error {
-	fs := flag.NewFlagSet("gen", flag.ExitOnError)
-	root := fs.String("root", ".", "装配仓库根目录")
-	out := fs.String("out", "brickkit.yaml", "输出文件路径")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	specs, err := genyaml.Load(filepath.Join(*root, "components"))
-	if err != nil {
-		return err
-	}
-	ids := make([]string, len(specs))
-	for i, s := range specs {
-		ids[i] = s.ID
-	}
-	yamlOut, err := genyaml.Gen(specs, ids)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(*out, []byte(yamlOut), 0o644); err != nil {
-		return err
-	}
-	fmt.Printf("✓ %s 已产出（%d 个组件）\n", *out, len(specs))
+	fmt.Printf("✓ 建库脚本已产出：%s（%d 个组件，%d 个外壳清单，目标库 %s）\n", *out, len(rows), len(shells), *database)
 	return nil
 }
 

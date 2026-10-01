@@ -1,5 +1,5 @@
 // Package registry 读写 registry/ 下的全局册子（ports.tsv / schemas.tsv /
-// permissions.tsv / data-scopes.tsv）。be-ops 的多个子命令（registry / gen /
+// permissions.tsv / data-scopes.tsv）。be-ops 的多个子命令（registry /
 // permissions / data-scopes）共用同一套解析逻辑，不许各自再实现一遍。
 //
 // 判据从 infra/scripts/registry-check.sh 原样搬过来（阶段一 Task 4 已经

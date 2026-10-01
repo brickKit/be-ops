@@ -1,13 +1,16 @@
 package dbscript
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestGen_每组件三样东西(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "")
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "",
+		[]Shell{{Name: "go-core", Members: []string{"erp/sales"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +41,7 @@ func TestGen_每组件三样东西(t *testing.T) {
 // 表设计规范的标准写法（§11.2.1），不是个例。
 func TestGen_序列也要授权不只是表(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "")
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +59,7 @@ func TestGen_组件角色之间互相看不见(t *testing.T) {
 	sql, _ := Gen([]Row{
 		{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"},
 		{Repo: "crm-lead", Schema: "crm_lead", Role: "crm_lead_rw", ShellLoginRole: "shell_go_backoffice"},
-	}, "")
+	}, "", nil)
 	// 权限墙：erp_sales_rw 绝不能拿到 crm_lead 的任何权限
 	if strings.Contains(sql, "ON SCHEMA crm_lead TO erp_sales_rw") {
 		t.Error("跨组件授权，PG RBAC 权限墙被打穿")
@@ -65,7 +68,7 @@ func TestGen_组件角色之间互相看不见(t *testing.T) {
 
 func TestGen_幂等(t *testing.T) {
 	sql, _ := Gen([]Row{{Repo: "mdm-org", Schema: "mdm_org",
-		Role: "mdm_org_rw", ShellLoginRole: "shell_go_core"}}, "")
+		Role: "mdm_org_rw", ShellLoginRole: "shell_go_core"}}, "", nil)
 	// CREATE ROLE 没有 IF NOT EXISTS，必须包在 DO 块里判存在
 	if !strings.Contains(sql, "DO $$") {
 		t.Error("CREATE ROLE 必须包在 DO 块里做存在判断，否则重跑会报 role already exists")
@@ -76,7 +79,7 @@ func TestGen_幂等(t *testing.T) {
 // 建库语句必须在产出里，且必须与 CREATE SCHEMA 分开——
 // PG 不能在一个库内部创建它自己，也不能在同一个事务里 CREATE DATABASE。
 func TestGen_建库语句单独一段(t *testing.T) {
-	sql, _ := Gen(nil, "")
+	sql, _ := Gen(nil, "", nil)
 	if !strings.Contains(sql, "CREATE DATABASE brickkit_db") {
 		t.Error("缺少 CREATE DATABASE brickkit_db")
 	}
@@ -92,7 +95,7 @@ func TestGen_建库语句单独一段(t *testing.T) {
 // 建库脚本悄悄还是建在 brickkit_db 上，测试数据继续混进演示数据。
 func TestGen_自定义database名真的生效(t *testing.T) {
 	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
-		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "brickkit_test_db")
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "brickkit_test_db", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +111,7 @@ func TestGen_自定义database名真的生效(t *testing.T) {
 }
 
 func TestGen_非法database名报错(t *testing.T) {
-	if _, err := Gen(nil, "brickkit-test-db"); err == nil {
+	if _, err := Gen(nil, "brickkit-test-db", nil); err == nil {
 		t.Error("database 名带连字符应该报错——identRe 只认小写字母数字下划线")
 	}
 }
@@ -118,7 +121,7 @@ func TestGen_非法database名报错(t *testing.T) {
 // 报 "syntax error at or near ":""。这条测试锁死修法：密码只能在顶层
 // ALTER ROLE 里设，不能出现在任何 DO $$ ... $$ 块内部。
 func TestGen_外壳密码不在DO块内部(t *testing.T) {
-	sql, err := Gen(nil, "")
+	sql, err := Gen(nil, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,5 +143,78 @@ func TestGen_外壳密码不在DO块内部(t *testing.T) {
 			t.Fatalf("DO 块内部混进了 PASSWORD :'...'，psql 不会在这里做变量替换：\n%s", block)
 		}
 		sql = sql[start+end+len("END $$;"):]
+	}
+}
+
+// 外壳登录角色：无外壳清单时也要建 4 个登录角色（且不再有 py_brain），
+// 但不产出任何成员 GRANT。
+func TestGen_无外壳清单只建登录角色(t *testing.T) {
+	sql, err := Gen([]Row{{Repo: "erp-sales", Schema: "erp_sales",
+		Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"}}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"shell_go_core", "shell_go_backoffice", "shell_go_infra", "shell_py_render"} {
+		if !strings.Contains(sql, "CREATE ROLE "+n+" LOGIN") {
+			t.Errorf("缺少登录角色 %s", n)
+		}
+	}
+	if strings.Contains(sql, "shell_py_brain") {
+		t.Error("shell_py_brain 已随旧外壳方案退役")
+	}
+	if strings.Contains(sql, "GRANT erp_sales_rw TO") {
+		t.Error("没有外壳清单时不该有成员 GRANT")
+	}
+}
+
+func TestGen_成员GRANT跟随外壳清单(t *testing.T) {
+	sql, err := Gen([]Row{
+		{Repo: "erp-sales", Schema: "erp_sales", Role: "erp_sales_rw", ShellLoginRole: "shell_go_core"},
+		{Repo: "infra-notification", Schema: "infra_notification", Role: "infra_notification_rw", ShellLoginRole: "shell_go_infra"},
+	}, "", []Shell{
+		{Name: "go-core", Members: []string{"erp/sales", "frontend/standard"}},
+		{Name: "go-infra", Members: []string{"infra/notification"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"CREATE ROLE shell_go_core LOGIN",
+		"GRANT erp_sales_rw TO shell_go_core",
+		"GRANT infra_notification_rw TO shell_go_infra",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("缺少 %q", want)
+		}
+	}
+	if strings.Contains(sql, "GRANT infra_notification_rw TO shell_go_core") {
+		t.Error("成员只授给自己所在的外壳")
+	}
+}
+
+func TestLoadShells_读成员并去掉版本(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "shell", "be", "go-core")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	y := "metadata:\n  id: be/go-core\nshell:\n  members: [erp/sales@1.0.26, mdm/customer@1.0.10]\n"
+	if err := os.WriteFile(filepath.Join(dir, "component.yaml"), []byte(y), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shells, err := LoadShells(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shells) != 1 || shells[0].Name != "go-core" || len(shells[0].Members) != 2 ||
+		shells[0].Members[0] != "erp/sales" || shells[0].LoginRole() != "shell_go_core" {
+		t.Fatalf("读出来不对：%+v", shells)
+	}
+}
+
+func TestLoadShells_目录不存在返回空(t *testing.T) {
+	shells, err := LoadShells(t.TempDir())
+	if err != nil || len(shells) != 0 {
+		t.Fatalf("应返回空且不报错：%v %v", shells, err)
 	}
 }
