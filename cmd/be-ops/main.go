@@ -9,6 +9,7 @@ import (
 
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
+	"github.com/brickKit/be-ops/internal/projconf"
 	"github.com/brickKit/be-ops/internal/protocol"
 	"github.com/brickKit/be-ops/internal/registry"
 )
@@ -133,53 +134,54 @@ func countComponents(ports []registry.PortRow) int {
 	return n
 }
 
-// runDBScript 是 "db-script --out <path> [--database <名字>]"：产出幂等
-// 建库 SQL（产出 2）。⚠️ `--database` 默认 `brickkit_db`（生产/真机部署
-// 走的那个库）——本地开发要给测试单独建一个隔离库时才需要显式传，比如
-// `--database brickkit_test_db`，见根 AGENTS.md"测试库与演示库分开"。
+// runDBScript 是 "db-script --out <path> [--database <名字>] [--deploy <部署文件>] [--password-vars]"：
+// 产出幂等建库脚本（产出 2）。每个组件的属主角色、运行角色、schema、库名全部取自项目配置
+// （config/<scope>-<name>.yaml 的 PG_OWNER_USER / PG_USER / PG_SCHEMA / PG_DATABASE，$var: 经
+// config/vars.yaml 和部署文件的 vars: 解析），不按命名规则推导（be-protocol P10.1）。
+// --database 把所有 PG_DATABASE 换成另一个库（本地测试库 brickkit_test_db）；--password-vars 只
+// 打印 "<psql 变量>\t<env:NAME|file:PATH>"，供 db-init 先 \set 口令（be-ops 从不读口令的值）。
 func runDBScript(args []string) error {
 	fs := flag.NewFlagSet("db-script", flag.ExitOnError)
 	root := fs.String("root", ".", "装配仓库根目录")
 	out := fs.String("out", "", "输出文件路径")
-	database := fs.String("database", "brickkit_db", "目标库名（本地测试库用 brickkit_test_db）")
+	database := fs.String("database", "", "把所有组件的 PG_DATABASE 换成这个库（本地测试库用 brickkit_test_db）")
+	deploy := fs.String("deploy", "deploy.yaml", "取其 vars: 覆盖 config/vars.yaml 的部署文件（相对 --root；空 = 不用）")
+	pwVars := fs.Bool("password-vars", false, "只打印口令变量清单")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	dp := ""
+	if *deploy != "" {
+		dp = filepath.Join(*root, *deploy)
+		if _, err := os.Stat(dp); err != nil {
+			dp = ""
+		}
+	}
+	p, err := projconf.Load(*root, dp)
+	if err != nil {
+		return err
+	}
+	plan, err := dbscript.Build(p, *database)
+	if err != nil {
+		return err
+	}
+	if *pwVars {
+		for _, l := range dbscript.PasswordVars(plan) {
+			fmt.Println(l)
+		}
+		return nil
+	}
 	if *out == "" {
-		return fmt.Errorf("用法：be-ops db-script --root <path> --out <path> [--database <名字>]")
+		return fmt.Errorf("用法：be-ops db-script --root <path> --out <path> [--database <名字>] [--password-vars]")
 	}
-
-	schemas, err := registry.LoadSchemas(filepath.Join(*root, "registry", "schemas.tsv"))
-	if err != nil {
-		return err
-	}
-	rows := make([]dbscript.Row, 0, len(schemas))
-	for _, s := range schemas {
-		rows = append(rows, dbscript.Row{
-			Repo: s.Repo, Schema: s.Schema, Role: s.Role, ShellLoginRole: s.ShellLoginRole,
-		})
-	}
-	shells, err := dbscript.LoadShells(*root)
-	if err != nil {
-		return err
-	}
-	ports, err := registry.LoadPorts(filepath.Join(*root, "registry", "ports.tsv"))
-	if err != nil {
-		return err
-	}
-	repos := make([]string, len(ports))
-	for i, p := range ports {
-		repos[i] = p.Repo
-	}
-	shells = dbscript.MergeShells(shells, dbscript.ShellNamesFromRepos(repos))
-	sql, err := dbscript.Gen(rows, *database, shells)
+	sql, err := dbscript.Render(plan)
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(*out, []byte(sql), 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("✓ 建库脚本已产出：%s（%d 个组件，%d 个外壳清单，目标库 %s）\n", *out, len(rows), len(shells), *database)
+	fmt.Printf("✓ 建库脚本已产出：%s（%d 个有库组件，%d 个外壳登录角色）\n", *out, len(plan.Components), len(plan.Shells))
 	return nil
 }
 
