@@ -57,12 +57,20 @@ func Render(plan Plan) (string, error) {
 		}
 		b.WriteString("\n")
 	}
+	if plan.Bus != nil {
+		renderBusOwner(&b)
+	}
 	b.WriteString("-- 3. Schemas and privileges, per database\n")
 	for _, db := range dbs {
 		fmt.Fprintf(&b, "\\connect %s\n", ident(db))
 		for _, c := range plan.Components {
 			if c.Database == db {
 				schema(&b, c)
+			}
+		}
+		if plan.Bus != nil && plan.Bus.Database == db {
+			if err := renderBus(&b, plan.Bus); err != nil {
+				return "", err
 			}
 		}
 	}
@@ -83,6 +91,9 @@ func databases(plan Plan) []string {
 			seen[s.Database] = true
 			out = append(out, s.Database)
 		}
+	}
+	if plan.Bus != nil && !seen[plan.Bus.Database] {
+		out = append(out, plan.Bus.Database)
 	}
 	sort.Strings(out)
 	return out

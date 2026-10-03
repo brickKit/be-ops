@@ -124,3 +124,37 @@ func TestRealPostgres16_RepairsAnOwnerMembership(t *testing.T) {
 		t.Errorf("re-running the script must revoke the membership, got %s", got)
 	}
 }
+
+func TestRealPostgres16_BusSchemaPublishAndConsume(t *testing.T) {
+	c := container(t)
+	plan, err := Build(project(t, busProject(t, nil)), "beops_it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runScript(t, c, plan)
+	runScript(t, c, plan) // idempotent
+
+	publish := "BEGIN; INSERT INTO be_bus.msg_id (stream, msg_id, expires_at) VALUES ('BE_ERP', 'm1-' || txid_current(), now() + interval '10 minutes') ON CONFLICT DO NOTHING RETURNING 1;" +
+		" INSERT INTO be_bus.message (stream, msg_id, subject, headers, data) VALUES ('BE_ERP', 'm1', 'erp.sales.order.created.v1', '{}', '\\x7b7d'); COMMIT;"
+	mustOK(t, c, "sales_rt", publish)
+	mustOK(t, c, "core_login", publish)
+	consume := "BEGIN; INSERT INTO be_bus.durable (name, stream, filter) VALUES ('d1', 'BE_ERP', 'erp.>') ON CONFLICT DO NOTHING;" +
+		" SELECT 1 FROM be_bus.durable WHERE name = 'd1' FOR UPDATE;" +
+		" INSERT INTO be_bus.delivery (durable, seq) SELECT 'd1', seq FROM be_bus.message WHERE tx_id < pg_snapshot_xmin(pg_current_snapshot()) ON CONFLICT DO NOTHING;" +
+		" UPDATE be_bus.durable SET last_seq = (SELECT max(seq) FROM be_bus.message) WHERE name = 'd1';" +
+		" SELECT seq FROM be_bus.delivery WHERE durable = 'd1' AND next_at <= now() FOR UPDATE SKIP LOCKED;" +
+		" DELETE FROM be_bus.delivery WHERE durable = 'd1'; DELETE FROM be_bus.msg_id WHERE expires_at < now(); COMMIT;"
+	mustOK(t, c, "sales_rt", consume)
+
+	mustFail(t, c, "cust_rt", "SELECT count(*) FROM be_bus.message;", "permission denied")
+	mustFail(t, c, "sales_own", "SELECT count(*) FROM be_bus.message;", "permission denied")
+	mustFail(t, c, "sales_rt", "DROP TABLE be_bus.delivery;", "must be owner")
+	mustFail(t, c, "sales_rt", "CREATE TABLE be_bus.evil (id int);", "permission denied")
+	if got := mustOK(t, c, "postgres", "SELECT string_agg(DISTINCT pg_get_userbyid(c.relowner), ',') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"+
+		" WHERE n.nspname = 'be_bus' AND c.relkind IN ('r', 'p', 'S');"); got != "be_bus_owner" {
+		t.Errorf("be_bus objects owned by %q, want be_bus_owner", got)
+	}
+	if got := mustOK(t, c, "postgres", "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'be_bus_owner';"); got != "f" {
+		t.Errorf("be_bus_owner must not log in, got %s", got)
+	}
+}

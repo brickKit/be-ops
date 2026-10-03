@@ -41,6 +41,7 @@ type ShellLogin struct {
 type Plan struct {
 	Components []Identity
 	Shells     []ShellLogin
+	Bus        *Bus // nil unless the project's EVENT_BUS_URL is the PostgreSQL queue
 }
 
 // Build reads the identities of every installed component from its configuration. database,
@@ -75,6 +76,11 @@ func Build(p *projconf.Project, database string) (Plan, error) {
 			plan.Shells = append(plan.Shells, sl)
 		}
 	}
+	bus, err := busOf(p, plan.Components, plan.Shells, database)
+	if err != nil {
+		return Plan{}, err
+	}
+	plan.Bus = bus
 	return plan, nil
 }
 
