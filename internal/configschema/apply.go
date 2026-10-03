@@ -68,7 +68,7 @@ func propsNode(cat *protocol.Catalogue, c *component.Component, b Block) *yaml.N
 	for i, p := range b.Props {
 		k := str(p.Name)
 		if i == 0 {
-			k.HeadComment = marker + strings.Join(b.Profiles, ", ") + extra(b.OptIns)
+			k.HeadComment = marker + strings.Join(b.Profiles, ", ") + extra(b.OptIns) + b.Note
 		}
 		v := &yaml.Node{Kind: yaml.MappingNode, Style: yaml.FlowStyle, Content: []*yaml.Node{str("type"), str(p.Type)}}
 		if p.Default != nil {

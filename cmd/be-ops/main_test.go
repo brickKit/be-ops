@@ -9,9 +9,9 @@ import (
 	"github.com/brickKit/be-ops/internal/testfixture"
 )
 
-func configGenerator() (generator, error) {
+func configGenerator(root string) (generator, error) {
 	cat, err := protocol.LoadCatalogue()
-	return configGen{cat: cat}, err
+	return configGen{cat: cat, root: root}, err
 }
 
 func TestGates_WidgetIsCurrentAndAStaleCopyFails(t *testing.T) {
@@ -19,15 +19,15 @@ func TestGates_WidgetIsCurrentAndAStaleCopyFails(t *testing.T) {
 	if err := runManifestGen("config-schema", []string{"--check", "--component", dir}, configGenerator); err != nil {
 		t.Errorf("config-schema --check on the widget: %v", err)
 	}
-	if err := runManifestGen("events", []string{"--check", "--component", dir}, func() (generator, error) { return eventsGen{}, nil }); err != nil {
+	if err := runManifestGen("events", []string{"--check", "--component", dir}, func(string) (generator, error) { return eventsGen{}, nil }); err != nil {
 		t.Errorf("events --check on the widget: %v", err)
 	}
 	src := testfixture.Read(t, dir, "component.yaml")
 	testfixture.Write(t, dir, "component.yaml", strings.Replace(src, "    - conformance.widget.reverted.v1\n", "", 1))
-	if err := runManifestGen("events", []string{"--check", "--component", dir}, func() (generator, error) { return eventsGen{}, nil }); err == nil {
+	if err := runManifestGen("events", []string{"--check", "--component", dir}, func(string) (generator, error) { return eventsGen{}, nil }); err == nil {
 		t.Error("a stale events block must fail the check")
 	}
-	if err := runManifestGen("events", []string{"--component", dir}, func() (generator, error) { return eventsGen{}, nil }); err != nil {
+	if err := runManifestGen("events", []string{"--component", dir}, func(string) (generator, error) { return eventsGen{}, nil }); err != nil {
 		t.Errorf("generation repairs it: %v", err)
 	}
 }

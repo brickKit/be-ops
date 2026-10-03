@@ -21,6 +21,7 @@ type Block struct {
 	OptIns   []string
 	Props    []Prop
 	Required []string // the protocol keys configSchema.required must list
+	Note     string   // appended to the marker's profile list (a shell: whose union it is)
 }
 
 // Generate computes the protocol block: every catalogue key of a selected profile or opted

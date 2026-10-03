@@ -46,6 +46,7 @@ type Component struct {
 	Version      string
 	Port         int
 	ExtraPorts   []Port
+	StopGrace    int      // deployment.stopGracePeriodSeconds; 0 when absent
 	ShellMembers []string // nil unless component.yaml has a shell block
 	IsShell      bool
 	Props        []Prop
@@ -70,6 +71,7 @@ type rawManifest struct {
 	Deployment struct {
 		Port       int    `yaml:"port"`
 		ExtraPorts []Port `yaml:"extraPorts"`
+		StopGrace  int    `yaml:"stopGracePeriodSeconds"`
 	} `yaml:"deployment"`
 	Events *Events `yaml:"events"`
 }
@@ -88,7 +90,7 @@ func Load(dir string) (*Component, error) {
 	c := &Component{
 		Dir: dir, ManifestPath: mp, ManifestRaw: raw,
 		ID: m.Metadata.ID, Version: m.Metadata.Version,
-		Port: m.Deployment.Port, ExtraPorts: m.Deployment.ExtraPorts,
+		Port: m.Deployment.Port, ExtraPorts: m.Deployment.ExtraPorts, StopGrace: m.Deployment.StopGrace,
 		Required: m.ConfigSchema.Required,
 	}
 	if m.Shell != nil {

@@ -53,9 +53,9 @@ func main() {
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
 	case "config-schema":
-		err = runManifestGen("config-schema", os.Args[2:], func() (generator, error) {
+		err = runManifestGen("config-schema", os.Args[2:], func(root string) (generator, error) {
 			cat, err := protocol.LoadCatalogue()
-			return configGen{cat: cat}, err
+			return configGen{cat: cat, root: root}, err
 		})
 	case "resources":
 		err = runResources(os.Args[2:])
@@ -68,7 +68,7 @@ func main() {
 	case "openapi":
 		err = runOpenAPI(os.Args[2:])
 	case "events":
-		err = runManifestGen("events", os.Args[2:], func() (generator, error) { return eventsGen{}, nil })
+		err = runManifestGen("events", os.Args[2:], func(string) (generator, error) { return eventsGen{}, nil })
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)
