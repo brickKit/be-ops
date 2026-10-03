@@ -8,14 +8,39 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 
 | 子命令 | 产出 # | 做什么 |
 |---|---|---|
-| `routes` | 1 | 网关路由表（三个出口，按组件是否进外壳分流） |
-| `db-script` | 2, 2b | 建库脚本：`DATABASE`/`SCHEMA`/`ROLE`/授权/外壳登录角色 + `bindings` |
-| `features` | 3 | Feature 清单，写进 IAM 适配层的 `enabledComponents` |
+| `routes` | 1 | （未实现，已由 `edge` 取代：路由生成进部署条目） |
+| `db-script` | 2, 2b | 建库脚本：每组件属主 / 运行两个 LOGIN 角色、schema 归属主、运行角色只有 DML、外壳 NOINHERIT 授权、角色级超时 |
+| `features` | 3 | （未实现） |
 | `registry` | 6 | 校验全局端口册与 schema 册自洽 |
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
+| `config-schema` | — | `component.yaml` configSchema 的协议键段（be-protocol P2.8 / P2.12） |
+| `events` | — | `component.yaml` 的 `events:` 段（be-protocol P12.16） |
+| `edge` | — | 部署条目的 Traefik 路由标签 / K8s `paths`、`infra/traefik/dynamic/edge.yml`（foundations 18） |
+| `resources` | — | 授权声明校验、`registry/resource-types.tsv`（只增）、`registry/resource-catalog.json`（RESOURCE_CATALOG） |
+| `data-subjects` | — | `registry/data-subjects.tsv` 覆盖每个组件 `lifecycle.yaml` 的擦除主体 |
+| `authzgen` | — | 每个组件的 authzgen 源文件（Go / Python / TS） |
 
-⚠️ **产出 5/11（`gen`，生成 `brickkit.yaml`）已退休（v0.2.0）**：`brickkit.yaml` / `deploy.yaml` / `config/` 现在由 `brickkit add` 等命令维护，be-ops 不再生成。`db-script` 的外壳登录角色（`shell_go_core` / `shell_go_backoffice` / `shell_go_infra` / `shell_py_render`）与 `shell/be/<name>/component.yaml` 的 `shell.members` 对应：登录角色总是产出，成员的 `GRANT <成员角色> TO <外壳登录角色>` 随清单里的成员自动出现。
+## v0.3.0：3.0.0 布局（O1，sdk-redesign §7.7）
+
+be-protocol 钉在 `go.mod`（`github.com/brickKit/be-protocol v1.0.0-rc.1`），`config-keys.yaml`、事件 subject 规则、能力枚举、assembly schema 直接从模块内嵌文件读，不复制。
+
+**生成器一律幂等、输出确定；`--check` 不写文件，不是最新就退出 1。** 门禁按下表调用：
+
+| 门禁（be-acceptance） | 命令 | 比较方式 |
+|---|---|---|
+| `protocol-config-scan` | `be-ops config-schema --check --root .`（组件仓库里：`--component .`） | 语义：协议键的名字、type、default、secret、mount、required 成员；另查自有键的 P2.4 / P2.12 |
+| `events-declaration-scan` | `be-ops events --check --root .`（或 `--component .`） | 集合：publishes = 事件契约减去 poke，subscribes = fixtures 的 `events.consumes` |
+| `edge-routes-fresh` | `be-ops edge --check --root .` | 语义：每个部署条目由 be-ops 拥有的字段（`traefik.*` 标签、`expose` / `hostname` / `tlsSecret` / `paths`、`k8s.ingressAnnotations`），`edge.yml` 逐字节；外加 OpenAPI 路径都在声明的前缀下 |
+| `authzgen-fresh` | `be-ops authzgen --check --root .` | 逐字节 |
+| （登记表） | `be-ops resources --check --root .`、`be-ops data-subjects --root .` | 校验 + `resource-types.tsv` / `resource-catalog.json` 逐字节 |
+
+- 不带 `--component` 时，`config-schema` / `events` / `authzgen` 只处理 `assembly.yaml` 声明了 `protocol` 的组件（3.0.0 起）；`--all` 连 2.x 一起。
+- **profile 怎么定**（与 be-protocol `conformance-cases.yaml` 的选取规则一致）：core / obs / err 恒有；auth = 有非 `public` 的 OpenAPI 操作、`auth: required` 的边缘路由或已声明的 auth 键；grpc = 名为 `grpc` 的额外端口；events-pub / events-sub = 事件契约 / fixtures；db（连同 jobs、lifecycle）= 声明了 `PG_SCHEMA` 或 `PG_HOST`；blob = 声明了 `S3_BUCKET` 或 `S3_URL`。`applies_when` 键：拥有带 `share` 的资源类型时自动加 `AUTHZ_GRPC_URL`，其余（`IAM_GRPC_URL` 等）声明了就保留。外壳的协议键段不在本版范围。
+- **poke 不进 `events:`**：事件契约里标 `x-signal: true` 或带 `transport` 的条目、顶层 `signals` / `x-signals` 都不算发布。
+- **edge**：设置文件 `infra/edge.yaml`（`host`、`tlsSecret`、`entrypoints`、`rate`、`ingressAnnotations`）。Docker 上的 router 规则是 ``Host(`h`) && PathRegexp(`^/prefix(/|$)`)``，优先级 = 前缀长度，名字 `<scope>-<name>-<i>` 不带版本；外壳条目同时带运行中成员的 router（服务端口是成员端口）。已用 Traefik v3.6.25 + Docker 29.7.1 真机验证（段边界、外壳成员、Host、413、剥头）；**Traefik v3.3.7 连不上 Docker 29**（客户端 API 1.24），foundations 18 写的"≥ 3.2"不够。
+- **authzgen** 默认路径：Go `backend/internal/authzgen/authzgen.go`（`besdk.PermKey` / `besdk.ResourceType` 常量 + `CatalogJSON`）、Python `backend/app/authzgen.py`（`Final` 常量 + `CATALOG_JSON`）、TS `src/authzgen.ts`（`as const` + `catalog`）；常量名去掉 domain（`erp.sales.pricing.read` → `SalesPricingRead` / `SALES_PRICING_READ`）。
+- **db-script**：名字全部来自 `config/<scope>-<name>.yaml`（`PG_OWNER_USER`、`PG_USER`、`PG_SCHEMA`、`PG_DATABASE`，`$var:` 经 `config/vars.yaml` 和部署文件 `vars:`）；口令只以 psql 变量出现，`be-ops db-script --password-vars` 打印 `<变量>\t<env:NAME|file:PATH>` 给 db-init 先 `\set`。真库测试：`docker run -d --name sdkb-ops-pg16 -e POSTGRES_PASSWORD=x postgres:16-alpine` 后 `make test-pg`。
 
 ## 现状
 

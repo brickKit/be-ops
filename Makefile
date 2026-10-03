@@ -1,6 +1,6 @@
 # be-ops 不是 brickKit 组件，但仍按总纲 §I 的 9 个门禁目标写。
 .DEFAULT_GOAL := help
-.PHONY: help check-version test image migrate-idempotent dag-check contract-check \
+.PHONY: help check-version test test-pg image migrate-idempotent dag-check contract-check \
         import-scan smoke module-check all
 
 help:  ## 列出所有目标
@@ -31,6 +31,9 @@ module-check:  ## N/A：没有 module.New 契约
 ##@ 对本仓库真正有意义的
 test:  ## 跑全部单测（-race）
 	go test ./... -race
+
+test-pg:  ## db-script 的真库测试：先起一次性容器 docker run -d --name sdkb-ops-pg16 -e POSTGRES_PASSWORD=x postgres:16-alpine，测完 docker rm -f
+	BEOPS_PG16_CONTAINER=$${BEOPS_PG16_CONTAINER:-sdkb-ops-pg16} go test -count=1 ./internal/dbscript/ -run RealPostgres -v
 
 dag-check:  ## 包依赖图无环（Go 编译器本身就不允许循环 import，这条恒过）
 	@go list ./... >/dev/null && echo "✓ 包依赖图无环（Go 编译器本身就不允许循环 import）"
