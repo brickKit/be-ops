@@ -9,6 +9,7 @@ import (
 
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
+	"github.com/brickKit/be-ops/internal/protocol"
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
@@ -19,12 +20,14 @@ import (
 // 装配仓库 docs/plans/04b-验证记录.md。编号不重排，因为 registry/*.tsv
 // 等别处按编号引用产出 9/10。它不是 brickKit 组件，不进 brickkit.yaml。
 var subcommands = map[string]string{
-	"registry":    "校验全局端口册与 schema 册自洽（产出 6）",
-	"db-script":   "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
-	"routes":      "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
-	"features":    "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
-	"permissions": "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
-	"data-scopes": "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
+	"registry":      "校验全局端口册与 schema 册自洽（产出 6）",
+	"db-script":     "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
+	"routes":        "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
+	"features":      "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
+	"permissions":   "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
+	"data-scopes":   "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
+	"config-schema": "生成 component.yaml configSchema 的协议键段（be-protocol P2.8；--check 供门禁 protocol-config-scan）",
+	"events":        "生成 component.yaml 的 events 段（be-protocol P12.16；--check 供门禁 events-declaration-scan）",
 }
 
 func main() {
@@ -43,6 +46,13 @@ func main() {
 		err = runPermissions(os.Args[2:])
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
+	case "config-schema":
+		err = runManifestGen("config-schema", os.Args[2:], func() (generator, error) {
+			cat, err := protocol.LoadCatalogue()
+			return configGen{cat: cat}, err
+		})
+	case "events":
+		err = runManifestGen("events", os.Args[2:], func() (generator, error) { return eventsGen{}, nil })
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)

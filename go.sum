@@ -1,3 +1,5 @@
+github.com/brickKit/be-protocol v1.0.0-rc.1 h1:3KZtoFwwYuzgF+BLs4+7JIFjEpObaiOzmIvmq1ZSx4c=
+github.com/brickKit/be-protocol v1.0.0-rc.1/go.mod h1:LLjqA+sJAzRDfvs/e7L7xErqMBYcjMyO4VASTIqtV+U=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=

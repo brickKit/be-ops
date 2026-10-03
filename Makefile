@@ -35,12 +35,12 @@ test:  ## 跑全部单测（-race）
 dag-check:  ## 包依赖图无环（Go 编译器本身就不允许循环 import，这条恒过）
 	@go list ./... >/dev/null && echo "✓ 包依赖图无环（Go 编译器本身就不允许循环 import）"
 
-import-scan:  ## 铁律六：be-ops 不许依赖任何组件仓库（be-sdk-go 白名单例外）
-	@bad="$$(go list -deps ./... 2>/dev/null | grep '^github.com/brickKit/' | grep -vE '^github.com/brickKit/be-ops($$|/)' | grep -vE '^github.com/brickKit/be-sdk-go($$|/)')"; \
+import-scan:  ## 铁律六：be-ops 不许依赖任何组件仓库（白名单：be-sdk-go、be-protocol）
+	@bad="$$(go list -deps ./... 2>/dev/null | grep '^github.com/brickKit/' | grep -vE '^github.com/brickKit/be-ops($$|/)' | grep -vE '^github.com/brickKit/be-(sdk-go|protocol)($$|/)')"; \
 	if [ -n "$$bad" ]; then \
 		echo "✗ be-ops 不许依赖任何组件仓库：$$bad"; exit 1; \
 	fi; \
-	echo "✓ 零组件依赖（be-sdk-go 例外，本工具用不到但白名单允许）"
+	echo "✓ 零组件依赖（be-sdk-go、be-protocol 例外：be-protocol 是生成器的输入，按 go.mod 钉的 tag 读）"
 
 ##@ 汇总
 all: check-version test image migrate-idempotent dag-check contract-check import-scan smoke module-check  ## 跑完整 9 项（含上面几条 N/A 直接过）
