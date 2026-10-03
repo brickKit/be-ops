@@ -10,7 +10,6 @@ import (
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
 	"github.com/brickKit/be-ops/internal/projconf"
-	"github.com/brickKit/be-ops/internal/protocol"
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
@@ -33,6 +32,7 @@ var subcommands = map[string]string{
 	"data-subjects": "校验 registry/data-subjects.tsv 覆盖各组件 lifecycle.yaml 的擦除主体",
 	"authzgen":      "生成每个组件的 authzgen 源文件（Go/Python/TS；--check 供门禁 authzgen-fresh）",
 	"openapi":       "把资源契约（be-protocol openapi/resource-authz.yaml）并进组件发布的 OpenAPI，并查每个操作都声明了守卫（缺 x-be-permission 即失败；--check 供门禁 openapi-fresh）",
+	"gates":         "列出门禁（be-acceptance A7）调用的全部 be-ops --check 命令；--run 在本进程里跑一遍",
 	"edge":          "从 edge_routes 生成部署条目的 Traefik 路由标签 / K8s paths 与 be-edge 中间件文件（--check 供门禁 edge-routes-fresh）",
 }
 
@@ -53,10 +53,7 @@ func main() {
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
 	case "config-schema":
-		err = runManifestGen("config-schema", os.Args[2:], func(root string) (generator, error) {
-			cat, err := protocol.LoadCatalogue()
-			return configGen{cat: cat, root: root}, err
-		})
+		err = runManifestGen("config-schema", os.Args[2:], configGenerator)
 	case "resources":
 		err = runResources(os.Args[2:])
 	case "data-subjects":
@@ -67,6 +64,8 @@ func main() {
 		err = runAuthzgen(os.Args[2:])
 	case "openapi":
 		err = runOpenAPI(os.Args[2:])
+	case "gates":
+		err = gates(os.Args[2:], os.Stdout)
 	case "events":
 		err = runManifestGen("events", os.Args[2:], func(string) (generator, error) { return eventsGen{}, nil })
 	default:

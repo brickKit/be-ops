@@ -79,6 +79,12 @@ type generator interface {
 	apply(c *component.Component) ([]byte, error)
 }
 
+// configGenerator builds the config-schema generator for a project root.
+func configGenerator(root string) (generator, error) {
+	cat, err := protocol.LoadCatalogue()
+	return configGen{cat: cat, root: root}, err
+}
+
 // configGen generates the protocol block of configSchema; a shell's block comes from its
 // members, whose sources are found under root's components/.
 type configGen struct {

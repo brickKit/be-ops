@@ -5,14 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/brickKit/be-ops/internal/protocol"
 	"github.com/brickKit/be-ops/internal/testfixture"
 )
-
-func configGenerator(root string) (generator, error) {
-	cat, err := protocol.LoadCatalogue()
-	return configGen{cat: cat, root: root}, err
-}
 
 func TestGates_WidgetIsCurrentAndAStaleCopyFails(t *testing.T) {
 	dir := testfixture.Copy(t, "widget")
