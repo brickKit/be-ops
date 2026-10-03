@@ -31,6 +31,7 @@ var subcommands = map[string]string{
 	"resources":     "校验 permissions/resources/requires_capabilities，维护 registry/resource-types.tsv（只增）并产出 RESOURCE_CATALOG",
 	"data-subjects": "校验 registry/data-subjects.tsv 覆盖各组件 lifecycle.yaml 的擦除主体",
 	"authzgen":      "生成每个组件的 authzgen 源文件（Go/Python/TS；--check 供门禁 authzgen-fresh）",
+	"edge":          "从 edge_routes 生成部署条目的 Traefik 路由标签 / K8s paths 与 be-edge 中间件文件（--check 供门禁 edge-routes-fresh）",
 }
 
 func main() {
@@ -58,6 +59,8 @@ func main() {
 		err = runResources(os.Args[2:])
 	case "data-subjects":
 		err = runDataSubjects(os.Args[2:])
+	case "edge":
+		err = runEdge(os.Args[2:])
 	case "authzgen":
 		err = runAuthzgen(os.Args[2:])
 	case "events":
