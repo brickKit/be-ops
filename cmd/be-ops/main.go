@@ -185,13 +185,16 @@ func runDBScript(args []string) error {
 	return nil
 }
 
-// runPermissions 是 "permissions --root <path>"：从各组件 assembly.yaml
-// 的 permissions 段聚合出 registry/permissions.tsv（产出 9）。⚠️ 这张表
-// 只增不改——已发布的 key 永远保留，本命令绝不删行，见 internal/authzreg
-// 包文档。
+// runPermissions 是 "permissions --root <path> [--check] [--base <file>]"：从各组件 assembly.yaml
+// 的 permissions 段聚合出 registry/permissions.tsv（产出 9）。⚠️ 这张表只增不改——已发布的 key
+// 永远保留，本命令绝不删行，见 internal/authzreg 包文档。--check 不写文件，不是最新就失败；
+// --base 是已提交的版本（git show HEAD:registry/permissions.tsv），结果相对它必须只增
+// （authzreg.AppendOnly：列只在末尾追加、旧键不删、非空的旧值不变）。
 func runPermissions(args []string) error {
 	fs := flag.NewFlagSet("permissions", flag.ExitOnError)
 	root := fs.String("root", ".", "装配仓库根目录")
+	check := fs.Bool("check", false, "不写文件；不是最新就退出 1")
+	base := fs.String("base", "", "已提交的 permissions.tsv；结果相对它必须只增")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -212,11 +215,27 @@ func runPermissions(args []string) error {
 	for _, w := range warnings {
 		fmt.Fprintln(os.Stderr, "⚠", w)
 	}
-	if err := authzreg.WritePermissionsTSV(tsvPath, rows); err != nil {
+	content := authzreg.RenderPermissionsTSV(rows)
+	stale, err := writeOrCheck(tsvPath, content, *check)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("✓ %s 已产出（%d 条权限键）\n", tsvPath, len(rows))
-	return nil
+	var problems []string
+	if stale {
+		problems = append(problems, tsvPath+" is not current: run be-ops permissions")
+	}
+	if *base != "" {
+		old, err := os.ReadFile(*base)
+		if err != nil {
+			return err
+		}
+		p, err := authzreg.AppendOnly(old, content)
+		if err != nil {
+			return err
+		}
+		problems = append(problems, p...)
+	}
+	return report("permissions", problems, len(decls))
 }
 
 // runDataScopes 是 "data-scopes --root <path>"：从各组件 assembly.yaml

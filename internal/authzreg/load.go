@@ -17,9 +17,10 @@ import (
 
 // PermissionDecl 是 assembly.yaml permissions 段的一条。
 type PermissionDecl struct {
-	Key   string `yaml:"key"`
-	Title string `yaml:"title"`
-	Type  string `yaml:"type"`
+	Key       string `yaml:"key"`
+	Title     string `yaml:"title"`
+	Type      string `yaml:"type"`
+	Delegable *bool  `yaml:"delegable"`
 }
 
 // DataScopeDecl 是 assembly.yaml data_scopes 段（非 none 时）的一条。

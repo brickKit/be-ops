@@ -3,6 +3,7 @@ package authzreg
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -13,6 +14,8 @@ type PermissionRow struct {
 	Type           string
 	OwnerComponent string
 	Deprecated     string
+	// Delegable is "true", "false" or empty (not stated). Once stated it never changes.
+	Delegable string
 }
 
 // DataScopeRow 对应 registry/data-scopes.tsv 的一行。
@@ -50,10 +53,13 @@ func GenPermissions(existing []PermissionRow, decls []AssemblyDecl) ([]Permissio
 				return nil, nil, fmt.Errorf(
 					"权限键 %s 被 %s 与 %s 同时声明——权限键必须全局唯一", p.Key, prev.OwnerComponent, d.ComponentID)
 			}
-			deprecated := byKey[p.Key].Deprecated
+			delegable, err := mergeDelegable(byKey[p.Key].Delegable, p)
+			if err != nil {
+				return nil, nil, err
+			}
 			byKey[p.Key] = PermissionRow{
 				Key: p.Key, Title: p.Title, Type: p.Type,
-				OwnerComponent: d.ComponentID, Deprecated: deprecated,
+				OwnerComponent: d.ComponentID, Deprecated: byKey[p.Key].Deprecated, Delegable: delegable,
 			}
 			declaredThisRun[p.Key] = true
 		}
@@ -76,6 +82,19 @@ func GenPermissions(existing []PermissionRow, decls []AssemblyDecl) ([]Permissio
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].Key < rows[j].Key })
 	return rows, warnings, nil
+}
+
+// mergeDelegable: an empty cell takes the declared value; a stated one is the released record and
+// never changes (not declaring it any more keeps it; declaring another value is refused).
+func mergeDelegable(have string, p PermissionDecl) (string, error) {
+	if p.Delegable == nil {
+		return have, nil
+	}
+	want := strconv.FormatBool(*p.Delegable)
+	if have != "" && have != want {
+		return "", fmt.Errorf("权限键 %s 在 permissions.tsv 里已发布为 delegable=%s，声明改成了 %s——已发布的值不改", p.Key, have, want)
+	}
+	return want, nil
 }
 
 // GenDataScopes 是纯派生（registry/README.md：data-scopes.tsv 不需要
