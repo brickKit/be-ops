@@ -18,3 +18,19 @@ func TestSubjectPattern_FromEnvelopeSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestAssemblySchema_CapabilitiesAndTypePattern(t *testing.T) {
+	s, err := LoadAssemblySchema()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.IsCapability("sharing") || !s.IsCapability("graph") || s.IsCapability("teleport") {
+		t.Errorf("capabilities = %v", s.Capabilities)
+	}
+	if !s.ResourceType.MatchString("erp.sales.order") || s.ResourceType.MatchString("erp.sales") {
+		t.Error("resource type pattern wrong")
+	}
+	if !s.PermKey.MatchString("erp.sales.view") || s.PermKey.MatchString("Erp.sales") {
+		t.Error("perm key pattern wrong")
+	}
+}

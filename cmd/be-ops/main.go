@@ -28,6 +28,9 @@ var subcommands = map[string]string{
 	"data-scopes":   "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
 	"config-schema": "生成 component.yaml configSchema 的协议键段（be-protocol P2.8；--check 供门禁 protocol-config-scan）",
 	"events":        "生成 component.yaml 的 events 段（be-protocol P12.16；--check 供门禁 events-declaration-scan）",
+	"resources":     "校验 permissions/resources/requires_capabilities，维护 registry/resource-types.tsv（只增）并产出 RESOURCE_CATALOG",
+	"data-subjects": "校验 registry/data-subjects.tsv 覆盖各组件 lifecycle.yaml 的擦除主体",
+	"authzgen":      "生成每个组件的 authzgen 源文件（Go/Python/TS；--check 供门禁 authzgen-fresh）",
 }
 
 func main() {
@@ -51,6 +54,12 @@ func main() {
 			cat, err := protocol.LoadCatalogue()
 			return configGen{cat: cat}, err
 		})
+	case "resources":
+		err = runResources(os.Args[2:])
+	case "data-subjects":
+		err = runDataSubjects(os.Args[2:])
+	case "authzgen":
+		err = runAuthzgen(os.Args[2:])
 	case "events":
 		err = runManifestGen("events", os.Args[2:], func() (generator, error) { return eventsGen{}, nil })
 	default:
