@@ -10,7 +10,7 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 |---|---|---|
 | `routes` | 1 | 网关路由表（三个出口，按组件是否进外壳分流） |
 | `db-script` | 2, 2b | 建库脚本：`DATABASE`/`SCHEMA`/`ROLE`/授权/外壳登录角色 + `bindings` |
-| `features` | 3 | Feature 清单，写进 IAM 适配层的 `enabledComponents` |
+| `features` | 3 | 部署的 `features` 文件：`brickkit.yaml` 选中的组件与精确版本；边缘（`be-edge`）只给已登录的会话（协议 20 UI25）。`be-ops features --root <装配项目> --out <文件>` |
 | `registry` | 6 | 校验全局端口册与 schema 册自洽 |
 | `permissions` | 9 | 权限键册 `registry/permissions.tsv`（第 14 章） |
 | `data-scopes` | 10 | 数据权限总表 `registry/data-scopes.tsv`（第 14 章） |
@@ -19,7 +19,7 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 
 ## 现状
 
-产出 4/7/8 已全部退休，见上方说明。其余命令的现状记录起点是阶段三 Task 3：已实现 `registry check`（产出 6）、`db-script`（产出 2、2b）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。`routes`/`features` 仍留待各自先决条件成熟（路由设计落地）时再实现。
+产出 4/7/8 已全部退休，见上方说明。其余命令的现状记录起点是阶段三 Task 3：已实现 `registry check`（产出 6）、`db-script`（产出 2、2b）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。`features` 已实现（底层先行第 2 项）；`routes` 仍留待路由设计落地时再实现。
 
 ### `permissions`/`data-scopes` 的判据（`internal/authzreg`）
 

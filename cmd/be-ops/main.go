@@ -9,6 +9,7 @@ import (
 
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
+	"github.com/brickKit/be-ops/internal/features"
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
@@ -22,7 +23,7 @@ var subcommands = map[string]string{
 	"registry":    "校验全局端口册与 schema 册自洽（产出 6）",
 	"db-script":   "产出建库脚本：DATABASE/SCHEMA/ROLE/授权/外壳登录角色（产出 2）",
 	"routes":      "产出网关路由表，两个出口按组件是否进外壳分流（产出 1）",
-	"features":    "产出 feature 清单，写进 IAM 适配层的 enabledComponents（产出 3）",
+	"features":    "产出部署的 features 文件：选中的组件与精确版本，边缘只给已登录的会话（协议 20 UI25，be-protocol P11.8）",
 	"permissions": "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
 	"data-scopes": "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
 }
@@ -43,6 +44,8 @@ func main() {
 		err = runPermissions(os.Args[2:])
 	case "data-scopes":
 		err = runDataScopes(os.Args[2:])
+	case "features":
+		err = runFeatures(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)
@@ -217,5 +220,31 @@ func runDataScopes(args []string) error {
 		return err
 	}
 	fmt.Printf("✓ %s 已产出（%d 条数据权限声明）\n", tsvPath, len(rows))
+	return nil
+}
+
+// runFeatures writes the deployment's features document from the project's brickkit.yaml (protocol 20, UI25).
+func runFeatures(args []string) error {
+	fs := flag.NewFlagSet("features", flag.ExitOnError)
+	root := fs.String("root", ".", "the assembly project's root")
+	out := fs.String("out", "", "where to write the document (the edge's featuresFile)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *out == "" {
+		return fmt.Errorf("usage: be-ops features --root <path> --out <file>")
+	}
+	raw, err := os.ReadFile(filepath.Join(*root, "brickkit.yaml"))
+	if err != nil {
+		return err
+	}
+	d, err := features.FromManifest(raw)
+	if err != nil {
+		return err
+	}
+	if err := features.Write(*out, d); err != nil {
+		return err
+	}
+	fmt.Printf("✓ %s: %d components\n", *out, len(d.Components))
 	return nil
 }
