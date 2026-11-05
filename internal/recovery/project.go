@@ -119,10 +119,11 @@ func (p *Project) properties(c Component) (props map[string]struct {
 // RECOVERY_PHASE (a Python member until be-sdk-python implements P1.22), or an enum without phase (a version from
 // before the phase): they would not start, so a recovery stops them (Hold).
 func (p *Project) Unsupported(phase string) []string {
+	hosted := p.hosted()
 	var out []string
 	for _, c := range p.Components {
-		if c.Kind == "shell" {
-			continue // its members are compiled in with one SDK
+		if c.Kind == "shell" || hosted[c.ID] {
+			continue // a shell and the members it hosts: compiled in with one SDK, the shell reads the phase
 		}
 		props, ok := p.properties(c)
 		if !ok {
@@ -131,6 +132,29 @@ func (p *Project) Unsupported(phase string) []string {
 		key, declared := props["RECOVERY_PHASE"]
 		if !declared || phase != "" && len(key.Enum) > 0 && !contains(key.Enum, phase) {
 			out = append(out, c.ID)
+		}
+	}
+	return out
+}
+
+// hosted are the components a shell hosts in this deployment (deploy.yaml: the members under a shell's entry). A
+// member's own manifest may declare no RECOVERY_PHASE (a probe: both probes' manifests agree, A144), yet hosted it
+// runs with the shell's SDK, which reads the phase.
+func (p *Project) hosted() map[string]bool {
+	var d struct {
+		Components []struct {
+			Members []struct {
+				ID string `yaml:"id"`
+			} `yaml:"members"`
+		} `yaml:"components"`
+	}
+	out := map[string]bool{}
+	if readYAML(filepath.Join(p.Dir, "deploy.yaml"), &d) != nil {
+		return out
+	}
+	for _, c := range d.Components {
+		for _, m := range c.Members {
+			out[m.ID] = true
 		}
 	}
 	return out

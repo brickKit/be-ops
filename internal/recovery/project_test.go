@@ -92,4 +92,8 @@ func TestThePhasesAVersionKnows(t *testing.T) {
 	assert.Equal(t, []string{"erp/pay"}, p.Senders())
 	assert.Equal(t, []string{"erp/pay"}, p.Checked("verifying"))
 	assert.Equal(t, []string{"erp/pay", "erp/sales"}, p.Checked("frozen"))
+
+	// hosted by a shell, a member runs with the shell's SDK whatever its own manifest says
+	write(t, dir, "deploy.yaml", "target: docker\ncomponents:\n  - id: be/go-infra\n    members:\n      - id: erp/sales\n")
+	assert.Empty(t, p.Unsupported("verifying"))
 }
