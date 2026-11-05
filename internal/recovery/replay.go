@@ -64,7 +64,7 @@ type Report struct {
 // RunReplay makes the calls of a plan. review are the subjects already under review (6.2: a signature that does not
 // hold); wait bounds the wait for 6.4; sleep is time.Sleep in production.
 func RunReplay(ctx context.Context, p Plan, c Caller, review []string, wait time.Duration, sleep func(time.Duration)) (Report, error) {
-	rep := Report{Ignored: p.Ignored}
+	rep := Report{Outcomes: []Outcome{}, Ignored: p.Ignored} // lists, never null: the run profile's encoding has none
 	subjects := map[string]bool{}
 	for _, s := range review {
 		subjects[s] = true

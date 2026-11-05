@@ -152,3 +152,33 @@ func TestAKeyThatIsNoFileIsMadeByHand(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, ".secrets/k.pem", p)
 }
+
+// The run profile's canonical encoding takes no null: a replay with nothing untrusted and nothing replayed records
+// empty lists, not nulls.
+func TestTheReplayRecordsNoNull(t *testing.T) {
+	ctx := context.Background()
+	p, prof := stepSix(t)
+	phase := ""
+	tool := &Tool{Project: p, Profile: prof, Out: &bytes.Buffer{}, Wait: 3 * time.Second,
+		Exec: func(_ context.Context, _, name string, args ...string) (string, error) {
+			if name == "brickkit" {
+				raw, _ := os.ReadFile(filepath.Join(p.Dir, "config/vars.yaml"))
+				_, v, _ := strings.Cut(string(raw), "RECOVERY_PHASE: ")
+				phase = strings.TrimSpace(v)
+				return "", nil
+			}
+			for i, a := range args {
+				if a == "-v" && strings.HasSuffix(args[i+1], ":/work") {
+					rep, err := RunReplay(ctx, Plan{}, &fakeCaller{}, nil, time.Second, func(time.Duration) {})
+					require.NoError(t, err)
+					out, _ := json.Marshal(rep)
+					require.NoError(t, os.WriteFile(filepath.Join(strings.TrimSuffix(args[i+1], ":/work"), "out.json"), out, 0o600))
+				}
+			}
+			return "", nil
+		},
+		Phases: func(context.Context) (map[string]string, error) { return map[string]string{"infra/audit": phase}, nil }}
+	require.NoError(t, tool.Replay(ctx, "/bin/be-ops"))
+	recs, _, _ := prof.List(ctx, runprofile.KindRecoveryStep)
+	assert.NotContains(t, string(recs[len(recs)-1].Body), "null")
+}

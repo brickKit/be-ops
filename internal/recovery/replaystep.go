@@ -60,6 +60,7 @@ func (p *Project) SystemAddresses() map[string]string {
 // signer is its recorder is replayed; any other is listed for review, and the subject it names (when it can be read)
 // is closed in 6.5 unless an authorization admin.
 func alerts(listed []runprofile.Listed) (trusted [][]byte, review []string, untrusted []string) {
+	untrusted = []string{} // recorded in the run profile, whose canonical encoding has no null
 	for _, l := range listed {
 		var rec struct {
 			RecordType string `json:"record_type"`
