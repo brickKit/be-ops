@@ -10,6 +10,7 @@ import (
 	"github.com/brickKit/be-ops/internal/authzreg"
 	"github.com/brickKit/be-ops/internal/dbscript"
 	"github.com/brickKit/be-ops/internal/features"
+	"github.com/brickKit/be-ops/internal/recovery"
 	"github.com/brickKit/be-ops/internal/registry"
 )
 
@@ -26,6 +27,7 @@ var subcommands = map[string]string{
 	"features":    "产出部署的 features 文件：选中的组件与精确版本，边缘只给已登录的会话（协议 20 UI25，be-protocol P11.8）",
 	"permissions": "产出权限键册 registry/permissions.tsv（产出 9，第 14 章）",
 	"data-scopes": "产出数据权限总表 registry/data-scopes.tsv（产出 10，第 14 章）",
+	"recover":     "整套恢复的工具（协议 15 的第 1–5 步）：宣布、冻结、恢复数据库、推进代次、重建消息流并补发；状态记在运行档案",
 }
 
 func main() {
@@ -46,6 +48,8 @@ func main() {
 		err = runDataScopes(os.Args[2:])
 	case "features":
 		err = runFeatures(os.Args[2:])
+	case "recover":
+		err = recovery.Main(os.Args[2:], os.Stdout)
 	default:
 		fmt.Fprintf(os.Stderr, "子命令 %q 尚未实现\n", os.Args[1])
 		os.Exit(1)

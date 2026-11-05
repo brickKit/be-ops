@@ -17,6 +17,16 @@ BrickEnterprise 装配生成器。**不是 brickKit 组件**，不进 `brickkit.
 
 ⚠️ **产出 5/11（`gen`，生成 `brickkit.yaml`）已退休（v0.2.0）**：`brickkit.yaml` / `deploy.yaml` / `config/` 现在由 `brickkit add` 等命令维护，be-ops 不再生成。`db-script` 的外壳登录角色（`shell_go_core` / `shell_go_backoffice` / `shell_go_infra` / `shell_py_render`）与 `shell/be/<name>/component.yaml` 的 `shell.members` 对应：登录角色总是产出，成员的 `GRANT <成员角色> TO <外壳登录角色>` 随清单里的成员自动出现。
 
+## `recover`：整套恢复（协议 15 的第 1–5 步）
+
+`be-ops recover <步骤> --project <BrickKit 项目>`：`status`、`announce`（原因、批准人、T）、`abandon`、`freeze`、`restore-db`、`advance`、`redeliver`（`be-ops recover` 不带参数列出全部用法）。
+
+- 恢复的状态记在运行档案（`recovery.step`，签名、对象锁）：每一步追加一条，状态是这些记录按顺序折叠的结果，所以它不随恢复的数据库回退；每一步先按协议 15 的状态表检查能不能做（`internal/recovery/state.go`），可以重做。
+- 阶段经共用变量 `RECOVERY_PHASE` 下发、换阶段 `brickkit up`（A140），工具读每个容器的自述核对全部成员到了这个阶段（现在只认 Docker）。
+- 第 3 步经 `infra/scripts/pg-backup.sh` 把实例恢复到临时实例，逐个 schema 拷回，审计的不拷；第 4 步按 P12.5 推进两种恢复代次（先写运行档案）；第 5 步删掉流，以 `redelivering` 重启，等每个消费者记下新的库纪元（它们按自己的进度向生产者要补发，线协议 P6.39），列出补发覆盖不了的缺口。
+- 配置：环境变量里的运行档案（`RUN_PROFILE_*`）、部署签发的 `ops/recover` 服务证书（`SERVICE_TLS_*`）、实例的管理员 DSN（`RECOVER_PG_ADMIN`）、`BUS_URL`；部署身份取项目的 `config/vars.yaml`。
+- 测试：`go test ./internal/recovery/`（运行档案、命令与成员的阶段用替身）；`go test -tags integration ./internal/recovery/`（第 4、5 步对真的库，`BE_SDK_TEST_PG_ADMIN`）。真的运行档案与外部命令在真机格的演练里走一遍。
+
 ## 现状
 
 产出 4/7/8 已全部退休，见上方说明。其余命令的现状记录起点是阶段三 Task 3：已实现 `registry check`（产出 6）、`db-script`（产出 2、2b）、`permissions`（产出 9）、`data-scopes`（产出 10）。均已用真实数据跑通——`registry/ports.tsv`（62 组件）+ `schemas.tsv`（54 行），`db-script` 产出的 SQL 已对真实 PostgreSQL 执行两遍验证幂等；`permissions`/`data-scopes` 已对阶段二五个真实组件的 `assembly.yaml` 跑通，产出 21 条权限键 + 4 条数据权限声明。`features` 已实现（底层先行第 2 项）；`routes` 仍留待路由设计落地时再实现。
