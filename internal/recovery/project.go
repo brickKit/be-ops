@@ -97,6 +97,62 @@ func readYAML(path string, v any) error {
 
 var phaseLine = regexp.MustCompile(`(?m)^RECOVERY_PHASE:.*\n?`)
 
+// Unsupported are the components run on their own whose version does not read the recovery phase (its manifest in
+// BrickKit's cache declares no RECOVERY_PHASE: a Python member until be-sdk-python implements P1.22): they cannot be
+// frozen, so a recovery stops them (Hold).
+func (p *Project) Unsupported() []string {
+	var out []string
+	for _, c := range p.Components {
+		if c.Kind == "shell" {
+			continue // its members are compiled in with one SDK
+		}
+		var m struct {
+			ConfigSchema struct {
+				Properties map[string]any `yaml:"properties"`
+			} `yaml:"configSchema"`
+		}
+		if err := readYAML(filepath.Join(p.Dir, ".brickkit", "manifests", c.ID, c.Version, "component.yaml"), &m); err != nil {
+			continue // not in the cache: a shell member, or nothing to judge by
+		}
+		if _, ok := m.ConfigSchema.Properties["RECOVERY_PHASE"]; !ok {
+			out = append(out, c.ID)
+		}
+	}
+	return out
+}
+
+// holdMark is the comment on the lines Hold writes, so that only those are taken out again.
+const holdMark = "# be-ops recover: cannot be frozen (no recovery mode)"
+
+// Hold stops the components that cannot be frozen while a recovery runs (on: mode: disable in the deploy file, which
+// BrickKit's next up honours) and starts them again after (off: the lines Hold wrote taken out).
+func (p *Project) Hold(ids []string, on bool) error {
+	path := filepath.Join(p.Dir, "deploy.yaml")
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) && len(ids) == 0 {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var out []string
+	for _, l := range strings.Split(string(raw), "\n") {
+		if strings.Contains(l, holdMark) {
+			continue
+		}
+		out = append(out, l)
+		if !on {
+			continue
+		}
+		for _, id := range ids {
+			if strings.TrimSpace(l) == "- id: "+id && strings.HasPrefix(l, "  - ") {
+				out = append(out, "    mode: disable  "+holdMark)
+			}
+		}
+	}
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o644)
+}
+
 // SetPhase writes the recovery phase into the shared variables (config/vars.yaml; A140), an empty value for running:
 // every component's configuration refers to it ($var:RECOVERY_PHASE, BrickKit injects only the keys a component's
 // configuration names), so the variable is always there; the rest of the file stays as it is. Every component reads

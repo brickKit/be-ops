@@ -51,3 +51,24 @@ components:
 	assert.Equal(t, "# shared\nPG_DATABASE: be_experiment\nDEPLOYMENT_ID: d1\nRECOVERY_PHASE: \"\"\n", string(raw),
 		"running: an empty value, the components' $var:RECOVERY_PHASE still resolves")
 }
+
+// A component whose cached manifest does not declare RECOVERY_PHASE cannot be frozen: the recovery stops it (mode:
+// disable in the deploy file) and takes back only the lines it wrote.
+func TestComponentsWithoutRecoveryModeAreStopped(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "brickkit.yaml", "project: r\ncomponents:\n  - id: be/go-infra\n    version: 3.0.52\n    kind: shell\n  - id: erp/sales\n    version: 3.0.24\n  - id: infra/print\n    version: 3.0.14\n")
+	write(t, dir, ".brickkit/manifests/erp/sales/3.0.24/component.yaml", "configSchema:\n  properties:\n    RECOVERY_PHASE:\n      type: string\n")
+	write(t, dir, ".brickkit/manifests/infra/print/3.0.14/component.yaml", "configSchema:\n  properties:\n    PG_HOST:\n      type: string\n")
+	deploy := "target: docker\ncomponents:\n  - id: erp/sales\n    expose: true\n  - id: infra/print\n    expose: true\n"
+	write(t, dir, "deploy.yaml", deploy)
+	p, err := LoadProject(dir)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"infra/print"}, p.Unsupported())
+	require.NoError(t, p.Hold(p.Unsupported(), true))
+	require.NoError(t, p.Hold(p.Unsupported(), true), "again: once")
+	raw, _ := os.ReadFile(filepath.Join(dir, "deploy.yaml"))
+	assert.Equal(t, "target: docker\ncomponents:\n  - id: erp/sales\n    expose: true\n  - id: infra/print\n    mode: disable  "+holdMark+"\n    expose: true\n", string(raw))
+	require.NoError(t, p.Hold(p.Unsupported(), false))
+	raw, _ = os.ReadFile(filepath.Join(dir, "deploy.yaml"))
+	assert.Equal(t, deploy, string(raw), "back as it was")
+}

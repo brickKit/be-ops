@@ -142,6 +142,13 @@ func (t *Tool) phase(ctx context.Context, phase string) error {
 	if err := t.Project.SetPhase(phase); err != nil {
 		return err
 	}
+	held := t.Project.Unsupported()
+	if err := t.Project.Hold(held, phase != ""); err != nil {
+		return err
+	}
+	if len(held) > 0 && phase != "" {
+		t.say("stopped while the recovery runs (no recovery mode): %v", held)
+	}
 	if out, err := t.Exec(ctx, t.Project.Dir, "brickkit", "up"); err != nil {
 		return fmt.Errorf("brickkit up: %w\n%s", err, tail(out))
 	}
@@ -151,7 +158,7 @@ func (t *Tool) phase(ctx context.Context, phase string) error {
 		var wrong []string
 		if err == nil {
 			for id, p := range got {
-				if p != phase {
+				if p != phase && !(phase != "" && slices.Contains(held, id)) {
 					wrong = append(wrong, id+"="+p)
 				}
 			}
