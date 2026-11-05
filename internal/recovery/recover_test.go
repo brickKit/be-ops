@@ -18,9 +18,10 @@ import (
 
 // fakeProfile keeps records in memory, as the run profile keeps them (append only).
 type fakeProfile struct {
-	mu   sync.Mutex
-	recs map[string][]runprofile.Record
-	fail bool
+	mu     sync.Mutex
+	recs   map[string][]runprofile.Record
+	fail   bool
+	listed []runprofile.Listed // ListAll of the alert channel: records with their verification as given
 }
 
 func (f *fakeProfile) Append(_ context.Context, kind string, body any) (runprofile.Record, error) {
@@ -42,6 +43,18 @@ func (f *fakeProfile) List(_ context.Context, kind string) ([]runprofile.Record,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]runprofile.Record(nil), f.recs[kind]...), nil, nil
+}
+
+func (f *fakeProfile) ListAll(ctx context.Context, kind string) ([]runprofile.Listed, error) {
+	if kind == runprofile.KindAlert {
+		return f.listed, nil
+	}
+	recs, _, err := f.List(ctx, kind)
+	out := make([]runprofile.Listed, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, runprofile.Listed{Key: r.ID, Record: r, Read: true})
+	}
+	return out, err
 }
 
 func (f *fakeProfile) Advance(ctx context.Context, kind string, seen ...int64) (int64, error) {

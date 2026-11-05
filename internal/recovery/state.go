@@ -18,7 +18,8 @@ const (
 	Restoring = "restoring"
 )
 
-// The steps (protocol 15): 1 announce, 2 freeze, 3 restore-db, 4 advance, 5 redeliver; abandon leaves before step 3.
+// The steps (protocol 15): 1 announce, 2 freeze, 3 restore-db, 4 advance, 5 redeliver, 6 replay (6.2-6.6) and keys
+// (6.8); abandon leaves before step 3.
 const (
 	StepAnnounce  = "announce"
 	StepAbandon   = "abandon"
@@ -26,6 +27,8 @@ const (
 	StepRestoreDB = "restore-db"
 	StepAdvance   = "advance"
 	StepRedeliver = "redeliver"
+	StepReplay    = "replay"
+	StepKeys      = "keys"
 )
 
 // AtLayout is the fixed width a step's time is written in, so the records order as strings (the run profile's
@@ -41,7 +44,7 @@ type Step struct {
 	Reason   string         `json:"reason,omitempty"`
 	Approver string         `json:"approver,omitempty"`
 	Detail   map[string]any `json:"detail,omitempty"` // what the step did (schemas copied back, generations, ...)
-	At       string         `json:"at"` // AtLayout, UTC
+	At       string         `json:"at"`               // AtLayout, UTC
 }
 
 // Status is the deployment's recovery state: the folded records.
@@ -120,6 +123,14 @@ func Allowed(st Status, step string) error {
 	case StepRedeliver:
 		if st.State != Restoring || !done(StepAdvance) {
 			return fmt.Errorf("advance the generations first")
+		}
+	case StepReplay:
+		if st.State != Restoring || !done(StepRedeliver) {
+			return fmt.Errorf("redeliver first")
+		}
+	case StepKeys:
+		if st.State != Restoring || !done(StepReplay) {
+			return fmt.Errorf("replay first")
 		}
 	default:
 		return fmt.Errorf("no such step: %s", step)

@@ -72,8 +72,11 @@ func TestAdvanceAndRedeliver(t *testing.T) {
 	phase := ""
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	tool := &Tool{Project: p, Profile: prof, Conn: conn, Out: &bytes.Buffer{}, Wait: 6 * time.Second,
-		Now:  func() time.Time { now = now.Add(time.Second); return now },
-		Exec: func(context.Context, string, string, ...string) (string, error) { phase = "redelivering"; return "", nil },
+		Now: func() time.Time { now = now.Add(time.Second); return now },
+		Exec: func(context.Context, string, string, ...string) (string, error) {
+			phase = "redelivering"
+			return "", nil
+		},
 		Phases: func(context.Context) (map[string]string, error) {
 			return map[string]string{"mdm/org": phase}, nil
 		},

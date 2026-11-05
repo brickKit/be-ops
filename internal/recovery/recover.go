@@ -20,6 +20,7 @@ import (
 type Profile interface {
 	Append(ctx context.Context, kind string, body any) (runprofile.Record, error)
 	List(ctx context.Context, kind string) ([]runprofile.Record, []error, error)
+	ListAll(ctx context.Context, kind string) ([]runprofile.Listed, error)
 	Advance(ctx context.Context, kind string, seen ...int64) (int64, error)
 }
 

@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,7 +25,7 @@ import (
 const Identity = "ops/recover"
 
 // Usage is be-ops recover's help.
-const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-5)
+const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-6)
 
   status                         the deployment's recovery state, from the run profile
   announce --reason R --approver A --at T
@@ -36,6 +37,14 @@ const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-5)
   advance                        step 4: the deployment's and the authorization's recovery generations
   redeliver                      step 5: the streams deleted, the members restart redelivering, every consumer asks
                                  its producers from its progress; waits for them and lists the gaps
+  replay                         step 6, 6.2-6.6: every member restarts replaying (the identity member ends the
+                                 sessions from before); the alert channel's intents verified; the evidence replayed
+                                 by its owners in order, the authorization member last; its sources waited for, its
+                                 deferred revocations, its invariant check; the list into the run profile. The calls
+                                 run in a container on the deployment's network (` + ReplayImage + `, this binary mounted:
+                                 build it with CGO_ENABLED=0)
+  keys                           step 6, 6.8: new signing keys (current and standby) into the identity member's key
+                                 files, the old ones kept beside them
 
   --project DIR (default .) is the BrickKit project; DEPLOYMENT_ID comes from its config/vars.yaml.
   Environment: RUN_PROFILE_URL, RUN_PROFILE_BUCKET, RUN_PROFILE_REGION, RUN_PROFILE_ACCESS_KEY, RUN_PROFILE_SECRET_KEY
@@ -49,6 +58,9 @@ func Main(args []string, out io.Writer) error {
 		return errors.New("which step?")
 	}
 	step := args[0]
+	if step == "replay-calls" { // inside the deployment's network (Tool.Calls): no project, no run profile
+		return replayCalls(args[1:])
+	}
 	fs := flag.NewFlagSet("recover "+step, flag.ContinueOnError)
 	project := fs.String("project", ".", "the BrickKit project")
 	reason := fs.String("reason", "", "why (announce)")
@@ -95,6 +107,14 @@ func Main(args []string, out io.Writer) error {
 		return t.Advance(ctx)
 	case StepRedeliver:
 		return t.Redeliver(ctx)
+	case StepReplay:
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return t.Replay(ctx, self)
+	case StepKeys:
+		return t.Keys(ctx)
 	}
 	return fmt.Errorf("no such step: %s\n%s", step, Usage)
 }
@@ -144,6 +164,39 @@ func build(p *Project, instance string, wait time.Duration, out io.Writer) (*Too
 		}
 	}
 	return t, nil
+}
+
+// replayCalls is the replay's calls (ReplayCalls) with the input and output files Tool.Calls mounts.
+func replayCalls(args []string) error {
+	fs := flag.NewFlagSet("recover replay-calls", flag.ContinueOnError)
+	in := fs.String("in", "", "the input (ReplayInput, JSON)")
+	out := fs.String("out", "", "where the report goes (JSON)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	var input ReplayInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return fmt.Errorf("%s: %w", *in, err)
+	}
+	env := os.Getenv
+	tlsID, err := identity.LoadServiceTLS(env("DEPLOYMENT_ID"), Identity, env("SERVICE_TLS_CERT_FILE"), env("SERVICE_TLS_KEY_FILE"),
+		env("SERVICE_TLS_CA_FILE"), os.ReadFile)
+	if err != nil {
+		return fmt.Errorf("the ops/recover certificate: %w", err)
+	}
+	caller := &GRPCCaller{TLS: tlsID, Addresses: input.Addresses, Recovery: input.Recovery}
+	defer caller.Close()
+	return ReplayCalls(context.Background(), caller, input, func(r Report) error {
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(*out, b, 0o600)
+	})
 }
 
 // run is an external command; its combined output comes back either way.
