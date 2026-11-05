@@ -191,7 +191,8 @@ func (t *Tool) RestoreDB(ctx context.Context, temp string, port int) error {
 	defer func() { _, _ = t.Exec(context.WithoutCancel(ctx), "", t.Backup, "drop-temp", temp) }()
 	var copied []string
 	for _, c := range t.Project.Restored() {
-		if out, err := t.Exec(ctx, "", "sh", "-c", fmt.Sprintf(
+		// pipefail: a pg_dump that fails mid-way must fail the step, not leave psql an empty schema to load
+		if out, err := t.Exec(ctx, "", "bash", "-o", "pipefail", "-c", fmt.Sprintf(
 			`docker exec -u postgres %s psql -v ON_ERROR_STOP=1 -qAt -d %s -c 'DROP SCHEMA IF EXISTS %s CASCADE' && `+
 				`docker exec -u postgres %s pg_dump -d %s -n %s | docker exec -i -u postgres %s psql -v ON_ERROR_STOP=1 -qAt -d %s`,
 			t.Instance, c.Database, c.Schema, temp, c.Database, c.Schema, t.Instance, c.Database)); err != nil {
