@@ -48,5 +48,6 @@ components:
 	assert.Equal(t, "# shared\nPG_DATABASE: be_experiment\nDEPLOYMENT_ID: d1\nRECOVERY_PHASE: redelivering\n", string(raw))
 	require.NoError(t, p.SetPhase(""))
 	raw, _ = os.ReadFile(filepath.Join(dir, "config/vars.yaml"))
-	assert.Equal(t, "# shared\nPG_DATABASE: be_experiment\nDEPLOYMENT_ID: d1\n", string(raw))
+	assert.Equal(t, "# shared\nPG_DATABASE: be_experiment\nDEPLOYMENT_ID: d1\nRECOVERY_PHASE: \"\"\n", string(raw),
+		"running: an empty value, the components' $var:RECOVERY_PHASE still resolves")
 }

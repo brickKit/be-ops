@@ -97,8 +97,10 @@ func readYAML(path string, v any) error {
 
 var phaseLine = regexp.MustCompile(`(?m)^RECOVERY_PHASE:.*\n?`)
 
-// SetPhase writes the recovery phase into the shared variables (config/vars.yaml; A140), or removes it for running;
-// the rest of the file stays as it is. Every component reads it at its next start (be-protocol P1.22).
+// SetPhase writes the recovery phase into the shared variables (config/vars.yaml; A140), an empty value for running:
+// every component's configuration refers to it ($var:RECOVERY_PHASE, BrickKit injects only the keys a component's
+// configuration names), so the variable is always there; the rest of the file stays as it is. Every component reads
+// it at its next start (be-protocol P1.22).
 func (p *Project) SetPhase(phase string) error {
 	path := filepath.Join(p.Dir, "config", "vars.yaml")
 	raw, err := os.ReadFile(path)
@@ -106,11 +108,13 @@ func (p *Project) SetPhase(phase string) error {
 		return err
 	}
 	s := phaseLine.ReplaceAllString(string(raw), "")
-	if phase != "" {
-		if s != "" && !strings.HasSuffix(s, "\n") {
-			s += "\n"
-		}
-		s += "RECOVERY_PHASE: " + phase + "\n"
+	if s != "" && !strings.HasSuffix(s, "\n") {
+		s += "\n"
 	}
+	value := phase
+	if value == "" {
+		value = `""`
+	}
+	s += "RECOVERY_PHASE: " + value + "\n"
 	return os.WriteFile(path, []byte(s), 0o644)
 }

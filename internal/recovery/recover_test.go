@@ -88,7 +88,7 @@ func TestTheFirstStepsInTurn(t *testing.T) {
 				raw, _ := os.ReadFile(filepath.Join(p.Dir, "config/vars.yaml"))
 				phase = ""
 				if _, v, ok := strings.Cut(string(raw), "RECOVERY_PHASE: "); ok {
-					phase = strings.TrimSpace(v)
+					phase = strings.Trim(strings.TrimSpace(v), `"`)
 				}
 			}
 			return "", nil
