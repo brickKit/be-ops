@@ -12,7 +12,8 @@ import (
 // deferred intent-only tightenings, the invariant check with the subjects under review (6.5). A record whose
 // re-execution fails is not skipped silently: its subject is closed for review (the check), the record listed.
 
-// Outcomes besides the SDK's (reflected, applied, dangling, unsupported) and the authorization member's (for_review).
+// Outcomes besides the SDK's (reflected, applied, dangling, unsupported; consistent, inconsistent for a record checked
+// outside the recovery group, P12.20: 6.7) and the authorization member's (for_review).
 const (
 	OutcomeFailed        = "failed"        // the owner answered an error: the record is listed, its subject closed
 	OutcomeUnimplemented = "unimplemented" // the owner has no ReplayService (an older version): listed for review
@@ -56,8 +57,8 @@ type Report struct {
 	Ignored  []Ignored   `json:"ignored,omitempty"`
 	SourceAt string      `json:"sources_applied_at"`
 	Check    CheckResult `json:"check"`
-	// Review are the records that need a person: failed, dangling, unsupported, unimplemented, for review, or
-	// intent-only (their ids).
+	// Review are the records that need a person: failed, dangling, unsupported, unimplemented, for review,
+	// inconsistent, or intent-only (their ids).
 	Review []string `json:"review,omitempty"`
 }
 
@@ -73,6 +74,7 @@ func RunReplay(ctx context.Context, p Plan, c Caller, review []string, wait time
 		rep.Outcomes = append(rep.Outcomes, Outcome{ID: r.ID, Owner: r.Owner, Category: r.Category, Phase: r.Phase,
 			Outcome: outcome, Detail: detail, IntentOnly: r.IntentOnly})
 		switch outcome {
+		case "consistent": // 6.7: the product outside the recovery group shows the change took place
 		case "applied", "reflected":
 			if r.IntentOnly {
 				rep.Review = append(rep.Review, r.ID)

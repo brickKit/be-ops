@@ -132,3 +132,19 @@ func TestTheCallsMergeTheStoreAndTheAlerts(t *testing.T) {
 		ReplayInput{}, func(Report) error { return nil })
 	assert.ErrorContains(t, err, "evidence record 0", "a record that is none stops the step")
 }
+
+// 6.7 with the identity product outside the recovery group (be-protocol P12.20): a credential tightening is checked,
+// not re-executed; consistent needs no one (an intent-only one too: the product shows the change took place);
+// inconsistent is for review, its subject not closed (the product holds the credential, nothing to close here).
+func TestACheckedRecordIsForReviewOnlyWhenInconsistent(t *testing.T) {
+	p := PlanReplay([]Evidence{
+		withSubject(t, rec(t, 1, "c-ok", "infra/iam-casdoor", "credential_tightening", "effective", "1.1", 1), "bob"),
+		withSubject(t, rec(t, 2, "c-intent", "infra/iam-casdoor", "credential_tightening", "intent", "", 0), "dan"),
+		withSubject(t, rec(t, 3, "c-bad", "infra/iam-casdoor", "credential_tightening_in_product", "general", "1.1", 2), "carol"),
+	})
+	f := &fakeCaller{outcomes: map[string]string{"c-ok": "consistent", "c-intent": "consistent", "c-bad": "inconsistent"}}
+	rep, err := RunReplay(context.Background(), p, f, nil, time.Minute, func(time.Duration) {})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"c-bad"}, rep.Review)
+	assert.Empty(t, f.subjects, "nothing closed for a check")
+}
