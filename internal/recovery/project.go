@@ -97,24 +97,66 @@ func readYAML(path string, v any) error {
 
 var phaseLine = regexp.MustCompile(`(?m)^RECOVERY_PHASE:.*\n?`)
 
-// Unsupported are the components run on their own whose version does not read the recovery phase (its manifest in
-// BrickKit's cache declares no RECOVERY_PHASE: a Python member until be-sdk-python implements P1.22): they cannot be
-// frozen, so a recovery stops them (Hold).
-func (p *Project) Unsupported() []string {
+// properties is a component's configSchema properties from its manifest in BrickKit's cache; ok false: not there (a
+// shell member compiled in, or nothing to judge by).
+func (p *Project) properties(c Component) (props map[string]struct {
+	Enum []string `yaml:"enum"`
+}, ok bool) {
+	var m struct {
+		ConfigSchema struct {
+			Properties map[string]struct {
+				Enum []string `yaml:"enum"`
+			} `yaml:"properties"`
+		} `yaml:"configSchema"`
+	}
+	if err := readYAML(filepath.Join(p.Dir, ".brickkit", "manifests", c.ID, c.Version, "component.yaml"), &m); err != nil {
+		return nil, false
+	}
+	return m.ConfigSchema.Properties, true
+}
+
+// Unsupported are the components run on their own whose version cannot run in phase: its manifest declares no
+// RECOVERY_PHASE (a Python member until be-sdk-python implements P1.22), or an enum without phase (a version from
+// before the phase): they would not start, so a recovery stops them (Hold).
+func (p *Project) Unsupported(phase string) []string {
 	var out []string
 	for _, c := range p.Components {
 		if c.Kind == "shell" {
 			continue // its members are compiled in with one SDK
 		}
-		var m struct {
-			ConfigSchema struct {
-				Properties map[string]any `yaml:"properties"`
-			} `yaml:"configSchema"`
+		props, ok := p.properties(c)
+		if !ok {
+			continue
 		}
-		if err := readYAML(filepath.Join(p.Dir, ".brickkit", "manifests", c.ID, c.Version, "component.yaml"), &m); err != nil {
-			continue // not in the cache: a shell member, or nothing to judge by
+		key, declared := props["RECOVERY_PHASE"]
+		if !declared || phase != "" && len(key.Enum) > 0 && !contains(key.Enum, phase) {
+			out = append(out, c.ID)
 		}
-		if _, ok := m.ConfigSchema.Properties["RECOVERY_PHASE"]; !ok {
+	}
+	return out
+}
+
+// Senders are the components that send external commands (their manifest declares EXTERNAL_COMMANDS_QUERY_ONLY,
+// be-protocol P13.10): step 7 reconciles them.
+func (p *Project) Senders() []string {
+	var out []string
+	for _, c := range p.Components {
+		if props, ok := p.properties(c); ok {
+			if _, sends := props["EXTERNAL_COMMANDS_QUERY_ONLY"]; sends {
+				out = append(out, c.ID)
+			}
+		}
+	}
+	return out
+}
+
+// Checked are the components with a database that run in phase: step 8 asks each for its checks (CheckService,
+// be-protocol P14.1), the evidence store included.
+func (p *Project) Checked(phase string) []string {
+	held := p.Unsupported(phase)
+	var out []string
+	for _, c := range p.Components {
+		if c.Schema != "" && !contains(held, c.ID) {
 			out = append(out, c.ID)
 		}
 	}

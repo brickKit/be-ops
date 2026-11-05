@@ -11,15 +11,17 @@ import (
 	"time"
 )
 
-// The deployment's states during a recovery (protocol 15, the state table; the steps after 5 come with T9 and T10).
+// The deployment's states during a recovery (protocol 15, the state table).
 const (
 	Running   = "running"
 	Frozen    = "frozen"
 	Restoring = "restoring"
+	Verifying = "verifying" // steps 7-9
+	ReadOnly  = "read_only" // open for reading
 )
 
 // The steps (protocol 15): 1 announce, 2 freeze, 3 restore-db, 4 advance, 5 redeliver, 6 replay (6.2-6.6) and keys
-// (6.8); abandon leaves before step 3.
+// (6.8), 7 reconcile, 8 check, 9 loss, 10 open-read and open; abandon leaves before step 3.
 const (
 	StepAnnounce  = "announce"
 	StepAbandon   = "abandon"
@@ -29,6 +31,11 @@ const (
 	StepRedeliver = "redeliver"
 	StepReplay    = "replay"
 	StepKeys      = "keys"
+	StepReconcile = "reconcile"
+	StepCheck     = "check"
+	StepLoss      = "loss"
+	StepOpenRead  = "open-read"
+	StepOpen      = "open"
 )
 
 // AtLayout is the fixed width a step's time is written in, so the records order as strings (the run profile's
@@ -74,7 +81,7 @@ func apply(st Status, s Step) Status {
 	case StepAnnounce:
 		t, _ := time.Parse(time.RFC3339Nano, s.T)
 		return Status{State: Frozen, Recovery: s.Recovery, T: t}
-	case StepAbandon:
+	case StepAbandon, StepOpen:
 		return Status{State: Running}
 	}
 	st.State = s.State
@@ -132,6 +139,22 @@ func Allowed(st Status, step string) error {
 		if st.State != Restoring || !done(StepReplay) {
 			return fmt.Errorf("replay first")
 		}
+	case StepReconcile: // steps 3-6 done: verifying (again while verifying)
+		if !(st.State == Restoring && done(StepKeys)) && st.State != Verifying {
+			return fmt.Errorf("finish step 6 first (replay and keys; the deployment is %s)", st.State)
+		}
+	case StepCheck, StepLoss:
+		if st.State != Verifying || !done(StepReconcile) {
+			return fmt.Errorf("reconcile first (step 7)")
+		}
+	case StepOpenRead:
+		if st.State != Verifying || !done(StepCheck) || !done(StepLoss) {
+			return fmt.Errorf("check and list the loss first (steps 8 and 9)")
+		}
+	case StepOpen:
+		if st.State != ReadOnly {
+			return fmt.Errorf("open for reading first (the deployment is %s)", st.State)
+		}
 	default:
 		return fmt.Errorf("no such step: %s", step)
 	}
@@ -143,8 +166,12 @@ func After(step string) string {
 	switch step {
 	case StepAnnounce:
 		return Frozen
-	case StepAbandon:
+	case StepAbandon, StepOpen:
 		return Running
+	case StepReconcile, StepCheck, StepLoss:
+		return Verifying
+	case StepOpenRead:
+		return ReadOnly
 	}
 	return Restoring
 }

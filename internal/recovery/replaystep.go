@@ -126,20 +126,28 @@ func (t *Tool) Replay(ctx context.Context, binary string) error {
 		"alerts_untrusted": untrusted}})
 }
 
-// Calls runs the replay's calls in the deployment's network: a container of ReplayImage with the tool's binary, the
-// ops/recover certificate and an input and output directory mounted, on the project's network.
+// Calls runs the replay's calls in the deployment's network (runCalls with replay-calls).
 func (t *Tool) Calls(ctx context.Context, binary string, in ReplayInput) (Report, error) {
-	dir, err := os.MkdirTemp("", "be-recover-replay-")
+	var rep Report
+	err := t.runCalls(ctx, binary, "replay-calls", in, &rep)
+	return rep, err
+}
+
+// runCalls runs one of the tool's calls subcommands in the deployment's network: a container of ReplayImage with the
+// tool's binary, the ops/recover certificate and an input and output directory mounted, on the project's network.
+// The output is read whenever the calls wrote one, also when they failed (a partial report).
+func (t *Tool) runCalls(ctx context.Context, binary, sub string, in, outp any) error {
+	dir, err := os.MkdirTemp("", "be-recover-calls-")
 	if err != nil {
-		return Report{}, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	raw, err := json.Marshal(in)
 	if err != nil {
-		return Report{}, err
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "in.json"), raw, 0o600); err != nil {
-		return Report{}, err
+		return err
 	}
 	certs := map[string]string{"SERVICE_TLS_CERT_FILE": "/certs/cert.pem", "SERVICE_TLS_KEY_FILE": "/certs/key.pem",
 		"SERVICE_TLS_CA_FILE": "/certs/ca.pem"}
@@ -150,21 +158,25 @@ func (t *Tool) Calls(ctx context.Context, binary string, in ReplayInput) (Report
 	}
 	vars := map[string]string{}
 	if err := readYAML(filepath.Join(t.Project.Dir, "config", "vars.yaml"), &vars); err != nil {
-		return Report{}, err
+		return err
 	}
-	args = append(args, "-e", "DEPLOYMENT_ID="+vars["DEPLOYMENT_ID"], ReplayImage, "/be-ops", "recover", "replay-calls",
+	args = append(args, "-e", "DEPLOYMENT_ID="+vars["DEPLOYMENT_ID"], ReplayImage, "/be-ops", "recover", sub,
 		"--in", "/work/in.json", "--out", "/work/out.json")
-	out, err := t.Exec(ctx, "", "docker", args...)
+	out, runErr := t.Exec(ctx, "", "docker", args...)
 	t.say("%s", tail(out))
-	if err != nil {
-		return Report{}, fmt.Errorf("the replay's calls: %w", err)
-	}
-	var rep Report
 	raw, err = os.ReadFile(filepath.Join(dir, "out.json"))
-	if err != nil {
-		return Report{}, fmt.Errorf("the replay's calls wrote no report: %w", err)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(raw, outp); err != nil {
+			return fmt.Errorf("the %s report: %w", sub, err)
+		}
+	case runErr == nil:
+		return fmt.Errorf("the %s wrote no report: %w", sub, err)
 	}
-	return rep, json.Unmarshal(raw, &rep)
+	if runErr != nil {
+		return fmt.Errorf("the %s: %w", sub, runErr)
+	}
+	return nil
 }
 
 // ReplayCalls is the calls' side, in the deployment's network: the evidence store's records and the trusted alerts

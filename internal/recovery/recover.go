@@ -143,7 +143,7 @@ func (t *Tool) phase(ctx context.Context, phase string) error {
 	if err := t.Project.SetPhase(phase); err != nil {
 		return err
 	}
-	held := t.Project.Unsupported()
+	held := t.Project.Unsupported(phase)
 	if err := t.Project.Hold(held, phase != ""); err != nil {
 		return err
 	}

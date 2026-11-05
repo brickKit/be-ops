@@ -63,12 +63,33 @@ func TestComponentsWithoutRecoveryModeAreStopped(t *testing.T) {
 	write(t, dir, "deploy.yaml", deploy)
 	p, err := LoadProject(dir)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"infra/print"}, p.Unsupported())
-	require.NoError(t, p.Hold(p.Unsupported(), true))
-	require.NoError(t, p.Hold(p.Unsupported(), true), "again: once")
+	assert.Equal(t, []string{"infra/print"}, p.Unsupported("frozen"))
+	require.NoError(t, p.Hold(p.Unsupported("frozen"), true))
+	require.NoError(t, p.Hold(p.Unsupported("frozen"), true), "again: once")
 	raw, _ := os.ReadFile(filepath.Join(dir, "deploy.yaml"))
 	assert.Equal(t, "target: docker\ncomponents:\n  - id: erp/sales\n    expose: true\n  - id: infra/print\n    mode: disable  "+holdMark+"\n    expose: true\n", string(raw))
-	require.NoError(t, p.Hold(p.Unsupported(), false))
+	require.NoError(t, p.Hold(p.Unsupported("frozen"), false))
 	raw, _ = os.ReadFile(filepath.Join(dir, "deploy.yaml"))
 	assert.Equal(t, deploy, string(raw), "back as it was")
+}
+
+// A version whose RECOVERY_PHASE enum does not name a phase cannot run in it; the senders of external commands and
+// the members with a database are read from the manifests too.
+func TestThePhasesAVersionKnows(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "brickkit.yaml", "project: r\ncomponents:\n  - id: erp/sales\n    version: 3.0.24\n  - id: erp/pay\n    version: 1.0.0\n")
+	write(t, dir, "config/erp-sales.yaml", "PG_DATABASE: be\nPG_SCHEMA: erp_sales\n")
+	write(t, dir, "config/erp-pay.yaml", "PG_DATABASE: be\nPG_SCHEMA: erp_pay\n")
+	write(t, dir, ".brickkit/manifests/erp/sales/3.0.24/component.yaml",
+		"configSchema:\n  properties:\n    RECOVERY_PHASE:\n      enum: [frozen, redelivering, replaying]\n")
+	write(t, dir, ".brickkit/manifests/erp/pay/1.0.0/component.yaml",
+		"configSchema:\n  properties:\n    RECOVERY_PHASE:\n      enum: [frozen, verifying, read_only]\n    EXTERNAL_COMMANDS_QUERY_ONLY:\n      type: boolean\n")
+	p, err := LoadProject(dir)
+	require.NoError(t, err)
+	assert.Empty(t, p.Unsupported("frozen"))
+	assert.Equal(t, []string{"erp/sales"}, p.Unsupported("verifying"), "an older version: its enum has no verifying")
+	assert.Empty(t, p.Unsupported(""), "running: every version")
+	assert.Equal(t, []string{"erp/pay"}, p.Senders())
+	assert.Equal(t, []string{"erp/pay"}, p.Checked("verifying"))
+	assert.Equal(t, []string{"erp/pay", "erp/sales"}, p.Checked("frozen"))
 }

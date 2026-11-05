@@ -25,7 +25,7 @@ import (
 const Identity = "ops/recover"
 
 // Usage is be-ops recover's help.
-const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-6)
+const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-10)
 
   status                         the deployment's recovery state, from the run profile
   announce --reason R --approver A --at T
@@ -45,6 +45,21 @@ const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-6)
                                  build it with CGO_ENABLED=0)
   keys                           step 6, 6.8: new signing keys (current and standby) into the identity member's key
                                  files, the old ones kept beside them
+  reconcile [--window D --failed-at T]
+                                 step 7: every member restarts verifying (external commands query only); each
+                                 adapter matches the external records from T minus the window (the declared clock skew
+                                 plus the external posting delay, default 1h) with its open commands and the issue
+                                 records after T; --failed-at is when sends after T may have gone on unrecorded until
+  check                          step 8: every member with a database answers its checks
+  loss [--failed-at T]           step 9: the audit store's business changes and sensitive reads after T asked of their
+                                 owners (lost, older, cannot tell), the audit loss, what must not be entered again
+  open-read --approver A [--reason R]
+                                 step 10: every member restarts read-only; checks that did not pass need a reason
+                                 (the approver confirms the key sets refreshed and an authorization admin can log in)
+  open --approver A              step 10: the continuous number series raised past the audit's numbers after T; every
+                                 member restarts running; the recovery is over
+  Steps 6-10 run their calls in a container on the deployment's network (` + ReplayImage + `, this binary mounted:
+  build it with CGO_ENABLED=0).
 
   --project DIR (default .) is the BrickKit project; DEPLOYMENT_ID comes from its config/vars.yaml.
   Environment: RUN_PROFILE_URL, RUN_PROFILE_BUCKET, RUN_PROFILE_REGION, RUN_PROFILE_ACCESS_KEY, RUN_PROFILE_SECRET_KEY
@@ -58,8 +73,11 @@ func Main(args []string, out io.Writer) error {
 		return errors.New("which step?")
 	}
 	step := args[0]
-	if step == "replay-calls" { // inside the deployment's network (Tool.Calls): no project, no run profile
+	switch step { // inside the deployment's network (Tool.runCalls): no project, no run profile
+	case "replay-calls":
 		return replayCalls(args[1:])
+	case "verify-calls":
+		return verifyCalls(args[1:])
 	}
 	fs := flag.NewFlagSet("recover "+step, flag.ContinueOnError)
 	project := fs.String("project", ".", "the BrickKit project")
@@ -70,6 +88,8 @@ func Main(args []string, out io.Writer) error {
 	port := fs.Int("port", 15439, "the temporary instance's host port (restore-db)")
 	instance := fs.String("instance", "be-postgres", "the database instance's container")
 	wait := fs.Duration("wait", 5*time.Minute, "how long to wait for the members and the consumers")
+	window := fs.Duration("window", time.Hour, "how far before T the external records are listed (reconcile)")
+	failedAt := fs.String("failed-at", "", "the failure moment, RFC 3339 (reconcile, loss)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -115,6 +135,19 @@ func Main(args []string, out io.Writer) error {
 		return t.Replay(ctx, self)
 	case StepKeys:
 		return t.Keys(ctx)
+	case StepReconcile, StepCheck, StepLoss, StepOpenRead, StepOpen:
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		if *failedAt != "" {
+			if _, err := time.Parse(time.RFC3339Nano, *failedAt); err != nil {
+				return fmt.Errorf("--failed-at: %w", err)
+			}
+		}
+		o := VerifyOptions{Binary: self, Window: *window, FailedAt: *failedAt, Approver: *approver, Reason: *reason}
+		return map[string]func(context.Context, VerifyOptions) error{StepReconcile: t.Reconcile, StepCheck: t.Check,
+			StepLoss: t.Loss, StepOpenRead: t.OpenRead, StepOpen: t.Open}[step](ctx, o)
 	}
 	return fmt.Errorf("no such step: %s\n%s", step, Usage)
 }
@@ -197,6 +230,41 @@ func replayCalls(args []string) error {
 		}
 		return os.WriteFile(*out, b, 0o600)
 	})
+}
+
+// verifyCalls is steps 7-10's calls (VerifyCalls) with the input and output files Tool.runCalls mounts.
+func verifyCalls(args []string) error {
+	fs := flag.NewFlagSet("recover verify-calls", flag.ContinueOnError)
+	in := fs.String("in", "", "the input (VerifyInput, JSON)")
+	out := fs.String("out", "", "where the report goes (JSON)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(*in)
+	if err != nil {
+		return err
+	}
+	var input VerifyInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return fmt.Errorf("%s: %w", *in, err)
+	}
+	env := os.Getenv
+	tlsID, err := identity.LoadServiceTLS(env("DEPLOYMENT_ID"), Identity, env("SERVICE_TLS_CERT_FILE"), env("SERVICE_TLS_KEY_FILE"),
+		env("SERVICE_TLS_CA_FILE"), os.ReadFile)
+	if err != nil {
+		return fmt.Errorf("the ops/recover certificate: %w", err)
+	}
+	caller := &GRPCCaller{TLS: tlsID, Addresses: input.Addresses, Recovery: input.Recovery}
+	defer caller.Close()
+	rep, err := VerifyCalls(context.Background(), caller, input)
+	b, merr := json.MarshalIndent(rep, "", "  ")
+	if merr != nil {
+		return merr
+	}
+	if werr := os.WriteFile(*out, b, 0o600); werr != nil && err == nil {
+		err = werr
+	}
+	return err
 }
 
 // run is an external command; its combined output comes back either way.
