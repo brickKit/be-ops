@@ -70,6 +70,7 @@ type VerifyReport struct {
 	Asked         int                       `json:"asked,omitempty"`         // loss: objects asked
 	Unnamed       int                       `json:"unnamed,omitempty"`       // loss: records naming no object
 	AuditLoss     []SourceLoss              `json:"audit_loss,omitempty"`    // loss
+	EvidenceLoss  []EvidenceLoss            `json:"evidence_loss,omitempty"` // loss: the double failures after T
 	Series        []Series                  `json:"series,omitempty"`        // numbers: every series
 	Raised        []Series                  `json:"raised,omitempty"`        // numbers: those the audit raises
 	Pass          bool                      `json:"pass"`                    // check: every check passed
@@ -172,6 +173,13 @@ func lossCalls(ctx context.Context, c VerifyCaller, t, failedAt time.Time, rep *
 		return err
 	}
 	rep.AuditLoss = AuditLoss(records, failedAt)
+	stored, err := c.ListEvidence(ctx)
+	if err != nil {
+		return err
+	}
+	if rep.EvidenceLoss = DoubleFailures(stored, t); len(rep.EvidenceLoss) == 0 {
+		rep.EvidenceLoss = nil
+	}
 	asked, unnamed := AskOwners(records)
 	rep.Asked, rep.Unnamed = len(asked), unnamed
 	byOwner := map[string][]Asked{}

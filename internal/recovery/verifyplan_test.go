@@ -110,3 +110,27 @@ func TestParseAudit(t *testing.T) {
 	_, err = ParseAudit("x", "", 0, []byte(`{"occurred_at":"yesterday"}`))
 	assert.Error(t, err)
 }
+
+func doubleFailureJSON(recorder, record, category, subject, at string) []byte {
+	return []byte(`{"record_type":"be.evidence.record","id":"df-` + record + `","category":"` + DoubleFailureCategory +
+		`","phase":"general","at":"` + at + `","recorder":{"component":"` + recorder + `"},"subject":"` + subject +
+		`","object":{"type":"infra.iam.account","id":"` + subject + `"},"change":{"record":"` + record +
+		`","category":"` + category + `","at":"` + at + `"}}`)
+}
+
+// Step 9 (RC22, be-protocol P12.23): the double failures after T, each naming the tightening neither the evidence
+// store nor the alert channel took; those before T are in the restored databases' own history, not a loss.
+func TestDoubleFailuresAfterT(t *testing.T) {
+	got := DoubleFailures([][]byte{
+		doubleFailureJSON("infra/iam-casdoor", "r-2", "account_status", "bob", "2026-11-05T10:05:00.000000Z"),
+		doubleFailureJSON("infra/authz", "r-1", "security_tightening", "carol", "2026-11-05T10:01:00.000000Z"),
+		doubleFailureJSON("infra/authz", "r-0", "security_tightening", "dan", "2026-11-05T09:59:00.000000Z"),
+		evidenceJSON("security_tightening", "infra/authz", "x", "2026-11-05T10:05:00.000000Z"),
+		[]byte("not json"),
+	}, tRec)
+	require.Len(t, got, 2)
+	assert.Equal(t, EvidenceLoss{Recorder: "infra/authz", Record: "r-1", Category: "security_tightening",
+		Subject: "carol", ObjectType: "infra.iam.account", ObjectID: "carol", At: "2026-11-05T10:01:00.000000Z"}, got[0],
+		"in time order")
+	assert.Equal(t, "r-2", got[1].Record)
+}

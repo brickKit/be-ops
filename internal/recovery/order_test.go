@@ -55,13 +55,15 @@ func TestThePlanGroupsOrdersAndSetsApart(t *testing.T) {
 		rec(t, 8, "i-off", "infra/iam-casdoor", "account_status", "effective", "1.1", 5), // the alert channel's copy
 		rec(t, 9, "a-grant", AuthzID, "security_widening", "general", "1.1", 3),
 		rec(t, 10, "a-only-widen", AuthzID, "security_widening", "intent", "", 0),
+		rec(t, 11, "i-lost", "infra/iam-casdoor", DoubleFailureCategory, "general", "1.1", 6), // P12.23: not replayed
 	})
 	assert.Equal(t, []string{"i-off", "o-early", "o-late", "o-only"}, order(p.Owners),
 		"by owner; each by (generation, timeline, sequence); intent-only last; a copy once")
 	assert.True(t, p.Owners[3].IntentOnly)
 	assert.Equal(t, []string{"a-grant", "a-only-widen"}, order(p.Authz), "the authorization member's own, last")
 	assert.Equal(t, []string{"a-intent"}, order(p.AuthzDeferred), "its intent-only tightenings wait for 6.4-6.5")
-	assert.Equal(t, []Ignored{{ID: "i-cancel", Owner: "infra/iam-casdoor", Reason: "cancelled"}}, p.Ignored)
+	assert.Equal(t, []Ignored{{ID: "i-cancel", Owner: "infra/iam-casdoor", Reason: "cancelled"},
+		{ID: "i-lost", Owner: "infra/iam-casdoor", Reason: "a double failure: listed in step 9"}}, p.Ignored)
 }
 
 func TestARecordWithoutAnIdentityOrAWrongEpochIsRefused(t *testing.T) {

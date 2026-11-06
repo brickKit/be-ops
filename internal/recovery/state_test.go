@@ -106,3 +106,40 @@ func TestTheStepsAfterTheReplay(t *testing.T) {
 	assert.Equal(t, Status{State: Running}, st, "open: the recovery is over")
 	assert.NoError(t, Allowed(st, StepAnnounce), "another one may start")
 }
+
+// RC75 (protocol 15): a difference found while verifying or open for reading: someone allowed freezes again, the fix is
+// made, and the steps from 7 on are done again before reopening; steps 1-6 stay done.
+func TestAFreezeAgainFromVerifyingOrReadOnly(t *testing.T) {
+	base := []Step{
+		{Step: StepAnnounce, State: Frozen, Recovery: "r1", T: "2026-11-05T09:00:00Z", At: at(1)},
+		{Step: StepFreeze, State: Restoring, At: at(2)}, {Step: StepRestoreDB, State: Restoring, At: at(3)},
+		{Step: StepAdvance, State: Restoring, At: at(4)}, {Step: StepRedeliver, State: Restoring, At: at(5)},
+		{Step: StepReplay, State: Restoring, At: at(6)}, {Step: StepKeys, State: Restoring, At: at(7)},
+		{Step: StepReconcile, State: Verifying, At: at(8)}, {Step: StepCheck, State: Verifying, At: at(9)},
+		{Step: StepLoss, State: Verifying, At: at(10)},
+	}
+	for _, c := range []struct {
+		name  string
+		steps []Step
+	}{
+		{"while verifying", base},
+		{"open for reading", append(append([]Step{}, base...), Step{Step: StepOpenRead, State: ReadOnly, At: at(11)})},
+	} {
+		st, err := Fold(c.steps)
+		require.NoError(t, err)
+		require.NoError(t, Allowed(st, StepFreeze), c.name)
+		st, err = Fold(append(append([]Step{}, c.steps...), Step{Step: StepFreeze, State: Restoring, At: at(20)}))
+		require.NoError(t, err, c.name)
+		assert.Equal(t, Restoring, st.State, c.name)
+		assert.Equal(t, []string{StepFreeze, StepRestoreDB, StepAdvance, StepRedeliver, StepReplay, StepKeys}, st.Done,
+			"%s: steps 7 on to be done again", c.name)
+		assert.Error(t, Allowed(st, StepOpenRead), "%s: not reopened before the checks again", c.name)
+		assert.Error(t, Allowed(st, StepCheck), "%s: reconcile first", c.name)
+		assert.NoError(t, Allowed(st, StepReconcile), c.name)
+		assert.NoError(t, Allowed(st, StepReplay), "%s: an earlier step may be done again too", c.name)
+	}
+	assert.Error(t, Refreeze(Status{State: Verifying}, "", "a difference"), "who allowed it is recorded")
+	assert.Error(t, Refreeze(Status{State: ReadOnly}, "ops", ""), "and why")
+	assert.NoError(t, Refreeze(Status{State: ReadOnly}, "ops", "a difference"))
+	assert.NoError(t, Refreeze(Status{State: Frozen}, "", ""), "the first freeze needs neither")
+}

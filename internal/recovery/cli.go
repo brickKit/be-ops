@@ -31,7 +31,10 @@ const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-10
   announce --reason R --approver A --at T
                                  step 1: T (RFC 3339) is the point in time the databases go back to
   abandon                        give a frozen deployment up (before any database went back)
-  freeze                         step 2: every member restarts frozen (RECOVERY_PHASE) and reports it
+  freeze [--approver A --reason R]
+                                 step 2: every member restarts frozen (RECOVERY_PHASE) and reports it; again while
+                                 verifying or open for reading (a difference found: who allows it and why), the
+                                 steps from 7 on are then done again
   restore-db [--temp N --port P] step 3: the instance at T into a temporary one, every schema copied back but the
                                  evidence store's
   advance                        step 4: the deployment's and the authorization's recovery generations
@@ -120,7 +123,7 @@ func Main(args []string, out io.Writer) error {
 	case StepAbandon:
 		return t.Abandon(ctx)
 	case StepFreeze:
-		return t.Freeze(ctx)
+		return t.Freeze(ctx, *approver, *reason)
 	case StepRestoreDB:
 		return t.RestoreDB(ctx, *temp, *port)
 	case StepAdvance:

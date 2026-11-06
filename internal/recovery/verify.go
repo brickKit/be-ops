@@ -110,8 +110,9 @@ func (t *Tool) Loss(ctx context.Context, o VerifyOptions) error {
 	for _, l := range rep.Lost {
 		lost[l.Verdict]++
 	}
-	t.say("the loss: %d objects asked, %v; %d records name no object; audit loss of %d sources; not to be entered again: %d",
-		rep.Asked, lost, rep.Unnamed, len(rep.AuditLoss), len(noReentry))
+	t.say("the loss: %d objects asked, %v; %d records name no object; audit loss of %d sources; not to be entered again: %d; "+
+		"double failures (tightenings without evidence, for review): %d", rep.Asked, lost, rep.Unnamed, len(rep.AuditLoss),
+		len(noReentry), len(rep.EvidenceLoss))
 	return t.record(ctx, st, Step{Step: StepLoss, Detail: map[string]any{"report": rep, "verdicts": lost,
 		"no_reentry": noReentry}})
 }

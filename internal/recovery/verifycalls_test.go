@@ -55,7 +55,9 @@ func (f *fakeMembers) MemberChecks(_ context.Context, m string) ([]CheckOutcome,
 func (f *fakeMembers) Present(_ context.Context, o string, _ []Asked) (map[string][2]string, error) {
 	return f.present[o], f.presErr[o]
 }
-func (f *fakeMembers) Numbers(_ context.Context, o string) ([]Series, error) { return f.numbers[o], nil }
+func (f *fakeMembers) Numbers(_ context.Context, o string) ([]Series, error) {
+	return f.numbers[o], nil
+}
 func (f *fakeMembers) Advance(_ context.Context, o string, s []Series) error {
 	if f.advanced == nil {
 		f.advanced = map[string][]Series{}
@@ -126,6 +128,13 @@ func TestLossCalls(t *testing.T) {
 	require.Len(t, rep.AuditLoss, 2)
 	assert.Equal(t, [][]int{{3, 3}}, rep.AuditLoss[0].Gaps, "the security change counts in the sequence")
 	assert.Equal(t, time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC), f.sinces[0], "from T")
+	assert.Empty(t, rep.EvidenceLoss)
+
+	f.evidence = [][]byte{doubleFailureJSON("infra/authz", "r-1", "security_tightening", "carol", "2026-11-05T10:01:00.000000Z")}
+	rep, err = VerifyCalls(context.Background(), f, input(CallsLoss))
+	require.NoError(t, err)
+	require.Len(t, rep.EvidenceLoss, 1, "the double failures after T in the loss (RC22)")
+	assert.Equal(t, "r-1", rep.EvidenceLoss[0].Record)
 }
 
 // Step 10: the numbers reported, then raised only with Raise, each owner its own series.

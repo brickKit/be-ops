@@ -123,7 +123,7 @@ func (t *Tool) Abandon(ctx context.Context) error {
 
 // Freeze is step 2: every member restarts in the frozen phase (no forwarding, subscription, job or user request:
 // be-protocol P1.23) and is seen to report it.
-func (t *Tool) Freeze(ctx context.Context) error {
+func (t *Tool) Freeze(ctx context.Context, approver, reason string) error {
 	st, err := t.Status(ctx)
 	if err != nil {
 		return err
@@ -131,10 +131,17 @@ func (t *Tool) Freeze(ctx context.Context) error {
 	if err := Allowed(st, StepFreeze); err != nil {
 		return err
 	}
+	if err := Refreeze(st, approver, reason); err != nil {
+		return err
+	}
 	if err := t.phase(ctx, "frozen"); err != nil {
 		return err
 	}
-	return t.record(ctx, st, Step{Step: StepFreeze, Detail: map[string]any{"phase": "frozen"}})
+	detail := map[string]any{"phase": "frozen"}
+	if st.State == Verifying || st.State == ReadOnly {
+		detail["again_from"] = st.State // steps 7 on are to be done again (RC75)
+	}
+	return t.record(ctx, st, Step{Step: StepFreeze, Approver: approver, Reason: reason, Detail: detail})
 }
 
 // phase writes the phase into the shared variables, brings the project up again and waits until every member

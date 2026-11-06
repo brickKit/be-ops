@@ -7,6 +7,7 @@ package recovery
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 )
@@ -83,6 +84,12 @@ func apply(st Status, s Step) Status {
 		return Status{State: Frozen, Recovery: s.Recovery, T: t}
 	case StepAbandon, StepOpen:
 		return Status{State: Running}
+	case StepFreeze:
+		if st.State == Verifying || st.State == ReadOnly { // frozen again: steps 7 on are to be done again
+			st.Done = slices.DeleteFunc(st.Done, func(d string) bool {
+				return d == StepReconcile || d == StepCheck || d == StepLoss || d == StepOpenRead
+			})
+		}
 	}
 	st.State = s.State
 	for _, d := range st.Done {
@@ -94,8 +101,18 @@ func apply(st Status, s Step) Status {
 	return st
 }
 
+// Refreeze is what a freeze needs beyond the state table: frozen again from verifying or read-only (RC75: a difference
+// found after step 6), who allowed it and why are recorded; the first freeze needs neither.
+func Refreeze(st Status, approver, reason string) error {
+	if (st.State == Verifying || st.State == ReadOnly) && (approver == "" || reason == "") {
+		return fmt.Errorf("freezing again from %s: who allows it and why are recorded (--approver, --reason)", st.State)
+	}
+	return nil
+}
+
 // Allowed checks a step against the state table: announce from running; abandon while frozen and before any database
-// is put back; freeze while frozen (or again while restoring); restore-db, advance and redeliver while restoring, each
+// is put back; freeze while frozen, again while restoring, or again from verifying or read-only (the steps from 7 on
+// are then done again: RC75); restore-db, advance and redeliver while restoring, each
 // after the one before it. A step may be repeated (protocol 15: "each step may be done again").
 func Allowed(st Status, step string) error {
 	done := func(s string) bool {
@@ -115,8 +132,8 @@ func Allowed(st Status, step string) error {
 		if st.State != Frozen {
 			return fmt.Errorf("only a frozen deployment is given up on, not %s: once the databases go back it goes on", st.State)
 		}
-	case StepFreeze:
-		if st.State != Frozen && st.State != Restoring {
+	case StepFreeze: // also from verifying or read-only (RC75): steps 7 on are then done again
+		if st.State == Running {
 			return fmt.Errorf("announce first (the deployment is %s)", st.State)
 		}
 	case StepRestoreDB:

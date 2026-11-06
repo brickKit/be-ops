@@ -118,6 +118,9 @@ func PlanReplay(records []Evidence) Plan {
 			r := any1(phases)
 			p.Ignored = append(p.Ignored, Ignored{ID: id, Owner: r.Owner, Reason: "cancelled"})
 			continue
+		case any1(phases).Category == DoubleFailureCategory: // P12.23: what it names was never stored
+			p.Ignored = append(p.Ignored, Ignored{ID: id, Owner: any1(phases).Owner, Reason: "a double failure: listed in step 9"})
+			continue
 		case has(phases, "effective"):
 			e = phases["effective"]
 		case has(phases, "general"):

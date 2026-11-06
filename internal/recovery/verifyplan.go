@@ -48,6 +48,57 @@ func IssuedAfter(records [][]byte, t time.Time) map[string][]string {
 	return out
 }
 
+// DoubleFailureCategory is the evidence category of the record a double failure leaves (be-protocol P12.23).
+const DoubleFailureCategory = "evidence_double_failure"
+
+// EvidenceLoss is a tightening neither the evidence store nor the alert channel took (a double failure): the replay
+// cannot apply it, so it is a declared loss whose subject and object a person reviews (protocol 15, step 9, RC22).
+type EvidenceLoss struct {
+	Recorder   string `json:"recorder"`
+	Record     string `json:"record"`   // the lost tightening's identity
+	Category   string `json:"category"` // and its category
+	Subject    string `json:"subject,omitempty"`
+	ObjectType string `json:"object_type,omitempty"`
+	ObjectID   string `json:"object_id,omitempty"`
+	At         string `json:"at"`
+}
+
+// DoubleFailures are the double failures at or after t, in time order (those before t are in the restored databases'
+// own history).
+func DoubleFailures(records [][]byte, t time.Time) []EvidenceLoss {
+	out := []EvidenceLoss{}
+	for _, raw := range records {
+		var r struct {
+			RecordType string `json:"record_type"`
+			Category   string `json:"category"`
+			At         string `json:"at"`
+			Subject    string `json:"subject"`
+			Recorder   struct {
+				Component string `json:"component"`
+			} `json:"recorder"`
+			Object struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+			} `json:"object"`
+			Change struct {
+				Record   string `json:"record"`
+				Category string `json:"category"`
+			} `json:"change"`
+		}
+		if json.Unmarshal(raw, &r) != nil || r.RecordType != "be.evidence.record" || r.Category != DoubleFailureCategory {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, r.At)
+		if err != nil || at.Before(t) {
+			continue
+		}
+		out = append(out, EvidenceLoss{Recorder: r.Recorder.Component, Record: r.Change.Record, Category: r.Change.Category,
+			Subject: r.Subject, ObjectType: r.Object.Type, ObjectID: r.Object.ID, At: r.At})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At < out[j].At })
+	return out
+}
+
 func contains(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {

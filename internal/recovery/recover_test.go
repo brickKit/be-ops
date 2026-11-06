@@ -110,14 +110,14 @@ func TestTheFirstStepsInTurn(t *testing.T) {
 			return map[string]string{"infra/audit": phase, "mdm/org": phase}, nil
 		}}
 
-	assert.Error(t, tool.Freeze(ctx), "announce first")
+	assert.Error(t, tool.Freeze(ctx, "", ""), "announce first")
 	assert.Error(t, tool.Announce(ctx, "", "alice", now.Add(-time.Hour)), "why is recorded")
 	assert.Error(t, tool.Announce(ctx, "ransomware", "alice", now.Add(time.Hour)), "T is in the past")
 	T := time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)
 	require.NoError(t, tool.Announce(ctx, "ransomware", "alice", T))
 	assert.Error(t, tool.RestoreDB(ctx, "tmp", 15439), "freeze first")
 
-	require.NoError(t, tool.Freeze(ctx))
+	require.NoError(t, tool.Freeze(ctx, "", ""))
 	raw, _ := os.ReadFile(filepath.Join(p.Dir, "config/vars.yaml"))
 	assert.Contains(t, string(raw), "RECOVERY_PHASE: frozen")
 	assert.Equal(t, []string{"brickkit up"}, cmds)
@@ -153,7 +153,7 @@ func TestAFreezeWaitsForEveryMember(t *testing.T) {
 			return map[string]string{"infra/audit": "frozen", "mdm/org": ""}, nil
 		}}
 	require.NoError(t, tool.Announce(ctx, "a test", "alice", now.Add(-time.Hour)))
-	err := tool.Freeze(ctx)
+	err := tool.Freeze(ctx, "", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mdm/org=")
 	st, _ := tool.Status(ctx)
