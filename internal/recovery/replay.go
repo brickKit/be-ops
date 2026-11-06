@@ -17,6 +17,7 @@ import (
 const (
 	OutcomeFailed        = "failed"        // the owner answered an error: the record is listed, its subject closed
 	OutcomeUnimplemented = "unimplemented" // the owner has no ReplayService (an older version): listed for review
+	OutcomeDeferred      = "deferred"      // the owner cannot decide yet: asked again after 6.4, still deferred for review
 )
 
 // Caller is what the replay calls.
@@ -86,10 +87,15 @@ func RunReplay(ctx context.Context, p Plan, c Caller, review []string, wait time
 			}
 		}
 	}
+	var later []Planned // answered deferred: asked again once the sources are applied (P12.20, P12.22)
 	for _, r := range append(append([]Planned{}, p.Owners...), p.Authz...) {
 		outcome, detail, err := c.Replay(ctx, r.Owner, r.Raw)
 		if err != nil {
 			return rep, fmt.Errorf("replaying %s at %s: %w (do the step again: what was done answers reflected)", r.ID, r.Owner, err)
+		}
+		if outcome == OutcomeDeferred {
+			later = append(later, r)
+			continue
 		}
 		note(r, outcome, detail)
 	}
@@ -107,6 +113,13 @@ func RunReplay(ctx context.Context, p Plan, c Caller, review []string, wait time
 		}
 	}
 	rep.SourceAt = asOf
+	for _, r := range later { // still deferred now: for review (noted as deferred)
+		outcome, detail, err := c.Replay(ctx, r.Owner, r.Raw)
+		if err != nil {
+			return rep, fmt.Errorf("replaying %s at %s again: %w", r.ID, r.Owner, err)
+		}
+		note(r, outcome, detail)
+	}
 	for _, r := range p.AuthzDeferred {
 		outcome, detail, err := c.ReplayDeferred(ctx, r.Raw)
 		if err != nil {

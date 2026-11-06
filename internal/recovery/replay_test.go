@@ -14,8 +14,10 @@ import (
 type fakeCaller struct {
 	calls      []string
 	outcomes   map[string]string // by record id; default applied
-	down       string            // an owner that cannot be reached
-	pending    int               // Sources answers not applied this many times
+	later      map[string]string // by record id: the outcome from the second ask on (after a deferred)
+	asked      map[string]int
+	down       string // an owner that cannot be reached
+	pending    int    // Sources answers not applied this many times
 	subjects   []string
 	unprovable []string
 }
@@ -31,6 +33,13 @@ func (f *fakeCaller) Replay(_ context.Context, owner string, raw []byte) (string
 		return "", "", errors.New("unavailable")
 	}
 	f.calls = append(f.calls, "replay "+idOf(raw))
+	if f.asked == nil {
+		f.asked = map[string]int{}
+	}
+	f.asked[idOf(raw)]++
+	if o := f.later[idOf(raw)]; o != "" && f.asked[idOf(raw)] > 1 {
+		return o, "because", nil
+	}
 	if o := f.outcomes[idOf(raw)]; o != "" {
 		return o, "because", nil
 	}
@@ -147,4 +156,28 @@ func TestACheckedRecordIsForReviewOnlyWhenInconsistent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"c-bad"}, rep.Review)
 	assert.Empty(t, f.subjects, "nothing closed for a check")
+}
+
+// be-protocol P12.20, P12.22: a record answered deferred (what it depends on not applied yet: an identity-side
+// release before the replayed freeze) is asked again once the authorization member applied its sources; applied then
+// is applied, still deferred is for review.
+func TestADeferredRecordIsAskedAgainAfterTheSources(t *testing.T) {
+	p := PlanReplay([]Evidence{
+		withSubject(t, rec(t, 1, "i-1", "infra/iam-casdoor", "account_status", "effective", "1.1", 1), "olga"),
+		rec(t, 2, "a-release", AuthzID, "security_widening", "general", "1.1", 2),
+		rec(t, 3, "a-stuck", AuthzID, "security_widening", "general", "1.1", 3),
+	})
+	f := &fakeCaller{pending: 1, outcomes: map[string]string{"a-release": "deferred", "a-stuck": "deferred"},
+		later: map[string]string{"a-release": "applied"}}
+	rep, err := RunReplay(context.Background(), p, f, nil, time.Minute, func(time.Duration) {})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"replay i-1", "replay a-release", "replay a-stuck", "sources ", "sources T1",
+		"replay a-release", "replay a-stuck", "check"}, f.calls, "asked again after the sources, in order")
+	assert.Equal(t, []string{"a-stuck"}, rep.Review, "still deferred: for review")
+	got := map[string]string{}
+	for _, o := range rep.Outcomes {
+		got[o.ID] = o.Outcome
+	}
+	assert.Equal(t, map[string]string{"i-1": "applied", "a-release": "applied", "a-stuck": "deferred"}, got,
+		"one outcome per record, the last")
 }
