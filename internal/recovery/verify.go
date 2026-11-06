@@ -197,13 +197,23 @@ func (t *Tool) OpenRead(ctx context.Context, o VerifyOptions) error {
 	if !pass && strings.TrimSpace(o.Reason) == "" {
 		return fmt.Errorf("the checks did not all pass (see the check step's list): --reason says why the differences are accepted")
 	}
+	// the guard "an authorization admin can log in" (protocol 15, RC84): no available one (pending recovery) is no
+	// opening; the deployment owner's administrator recovery comes first (infra/authz cmd/recover)
+	var admins VerifyReport
+	if err := t.runCalls(ctx, o.Binary, "verify-calls", t.verifyInput(st, CallsAdmins, o), &admins); err != nil {
+		return err
+	}
+	if admins.AdminState == "pending" {
+		return fmt.Errorf("no authorization admin is available (the authorization state is pending): do the deployment " +
+			"owner's administrator recovery first (infra/authz cmd/recover), then open for reading")
+	}
 	if err := t.phase(ctx, "read_only"); err != nil {
 		return err
 	}
-	t.say("open for reading; the checks passed: %v", pass)
+	t.say("open for reading; the checks passed: %v; the authorization state: %s", pass, admins.AdminState)
 	return t.record(ctx, st, Step{Step: StepOpenRead, Approver: o.Approver, Reason: o.Reason, Detail: map[string]any{
-		"checks_passed": pass, "confirmed_by_approver": []string{"every verifier refreshed the key set",
-			"an authorization admin can log in"}}})
+		"checks_passed": pass, "admin_state": admins.AdminState,
+		"confirmed_by_approver": []string{"every verifier refreshed the key set"}}})
 }
 
 // Open is step 10's second half: the continuous series raised past the numbers the audit names after T (P14.5),

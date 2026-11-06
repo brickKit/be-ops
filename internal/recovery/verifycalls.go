@@ -23,6 +23,7 @@ const (
 	CallsCheck     = "check"
 	CallsLoss      = "loss"
 	CallsNumbers   = "numbers"
+	CallsAdmins    = "admins" // the open-read guard: the authorization member's state (RC84)
 )
 
 // verifyCallLimit bounds one call of steps 7-10 (a reconciliation lists or queries an external system).
@@ -74,6 +75,7 @@ type VerifyReport struct {
 	Series        []Series                  `json:"series,omitempty"`        // numbers: every series
 	Raised        []Series                  `json:"raised,omitempty"`        // numbers: those the audit raises
 	Pass          bool                      `json:"pass"`                    // check: every check passed
+	AdminState    string                    `json:"admin_state,omitempty"`   // admins: the authorization state
 }
 
 // VerifyCaller is what the calls need of the members.
@@ -85,6 +87,9 @@ type VerifyCaller interface {
 	Present(ctx context.Context, owner string, objs []Asked) (map[string][2]string, error) // id\x00type -> answer, version
 	Numbers(ctx context.Context, owner string) ([]Series, error)
 	Advance(ctx context.Context, owner string, series []Series) error
+	// AdminState is the authorization member's state (operational, pending: no available authorization admin), from
+	// its invariant check with no new subject under review.
+	AdminState(ctx context.Context) (string, error)
 }
 
 // unimplemented reports a member that answers no standard method of chapters 13 and 14 (an older version).
@@ -112,6 +117,8 @@ func VerifyCalls(ctx context.Context, c VerifyCaller, in VerifyInput) (VerifyRep
 		err = lossCalls(ctx, c, t, failedAt, &rep)
 	case CallsNumbers:
 		err = numberCalls(ctx, c, in, t, &rep)
+	case CallsAdmins:
+		rep.AdminState, err = c.AdminState(ctx)
 	default:
 		err = fmt.Errorf("no such calls: %s", in.Kind)
 	}
@@ -282,6 +289,13 @@ func (g *GRPCCaller) checks(member string) (recoverypb.CheckServiceClient, error
 		return nil, err
 	}
 	return recoverypb.NewCheckServiceClient(c), nil
+}
+
+// AdminState is the authorization member's invariant check again, with no new subject (6.5's check is idempotent: it
+// accounts every record again and closes only the subjects named).
+func (g *GRPCCaller) AdminState(ctx context.Context) (string, error) {
+	res, err := g.Check(ctx, nil)
+	return res.AdminState, err
 }
 
 func (g *GRPCCaller) MemberChecks(ctx context.Context, member string) ([]CheckOutcome, error) {

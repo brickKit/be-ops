@@ -31,6 +31,7 @@ func TestTheStepsOfVerifyingAndOpening(t *testing.T) {
 		CallsCheck:   {Checks: map[string][]CheckOutcome{"mdm/org": {{Check: "x", Outcome: "diff", Differences: []string{}}}}, Pass: false},
 		CallsLoss:    {Lost: []Lost{}, AuditLoss: []SourceLoss{}},
 		CallsNumbers: {Raised: []Series{{Owner: "mdm/org", Code: "X", Max: 3}}},
+		CallsAdmins:  {AdminState: "pending"},
 	}
 	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	var out bytes.Buffer
@@ -94,6 +95,11 @@ func TestTheStepsOfVerifyingAndOpening(t *testing.T) {
 	assert.ErrorContains(t, tool.OpenRead(ctx, VerifyOptions{Approver: "alice"}), "--reason", "a check did not pass")
 	assert.Equal(t, "verifying", phase, "nothing changed")
 	assert.Error(t, tool.Open(ctx, VerifyOptions{Approver: "alice"}), "read-only first")
+	// RC84: no available authorization admin (pending recovery): not opened, the administrator recovery first
+	assert.ErrorContains(t, tool.OpenRead(ctx, VerifyOptions{Approver: "alice", Reason: "x differs by design"}),
+		"administrator recovery")
+	assert.Equal(t, "verifying", phase, "nothing changed")
+	reports[CallsAdmins] = VerifyReport{AdminState: "operational"}
 	require.NoError(t, tool.OpenRead(ctx, VerifyOptions{Approver: "alice", Reason: "x differs by design"}))
 	assert.Equal(t, "read_only", phase)
 	st, _ := tool.Status(ctx)

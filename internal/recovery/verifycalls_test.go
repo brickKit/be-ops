@@ -26,7 +26,10 @@ type fakeMembers struct {
 	numbers   map[string][]Series
 	advanced  map[string][]Series
 	sinces    []time.Time
+	admin     string
 }
+
+func (f *fakeMembers) AdminState(context.Context) (string, error) { return f.admin, nil }
 
 func (f *fakeMembers) ListEvidence(context.Context) ([][]byte, error) { return f.evidence, nil }
 func (f *fakeMembers) ListAudit(_ context.Context, since time.Time, categories []string) ([]AuditRecord, error) {
@@ -153,4 +156,12 @@ func TestNumberCalls(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []Series{{Owner: "erp/billing", LegalEntity: "le-1", Code: "INV", Period: "2026", Max: 9, FromAudit: 9}},
 		f.advanced["erp/billing"])
+}
+
+// The open-read guard's call (RC84): the authorization member's state, from its invariant check with no new subject.
+func TestAdminsCall(t *testing.T) {
+	f := &fakeMembers{admin: "pending"}
+	rep, err := VerifyCalls(context.Background(), f, input(CallsAdmins))
+	require.NoError(t, err)
+	assert.Equal(t, "pending", rep.AdminState)
 }
