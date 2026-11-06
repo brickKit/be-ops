@@ -56,8 +56,9 @@ func (p *Project) SystemAddresses() map[string]string {
 	return out
 }
 
-// alerts sorts the alert channel's records (6.2): an evidence record whose run-profile signature holds and whose
-// signer is its recorder is replayed; any other is listed for review, and the subject it names (when it can be read)
+// alerts sorts the alert channel's records (6.2): an evidence record whose run-profile signature holds at its receipt
+// against the trust material's history and whose signer (the record's writer, which P12.4 binds to the signing
+// certificate's identity) is its recorder is replayed; any other is listed for review, and the subject it names (when it can be read)
 // is closed in 6.5 unless an authorization admin.
 func alerts(listed []runprofile.Listed) (trusted [][]byte, review []string, untrusted []string) {
 	untrusted = []string{} // recorded in the run profile, whose canonical encoding has no null
@@ -103,6 +104,17 @@ func (t *Tool) Replay(ctx context.Context, binary string) error {
 	if err := t.phase(ctx, "replaying"); err != nil {
 		return err
 	}
+	// 6.2: every alert-channel record judged at its receipt against the trust material's history (ListAll applies
+	// it); the trust records the history does not use (off the chain from the trust root, a signature that does not
+	// hold) are alerted and recorded
+	history, err := t.Profile.Trust(ctx)
+	if err != nil {
+		return fmt.Errorf("the trust material's history: %w", err)
+	}
+	notUsed := append([]string{}, history.Problems...) // recorded; the canonical encoding has no null
+	for _, p := range notUsed {
+		t.say("⚠ a trust record is not used (6.2): %s", p)
+	}
 	listed, err := t.Profile.ListAll(ctx, runprofile.KindAlert)
 	if err != nil {
 		return fmt.Errorf("the alert channel: %w", err)
@@ -123,7 +135,7 @@ func (t *Tool) Replay(ctx context.Context, binary string) error {
 	}
 	t.say("replayed: %v; ignored %d; for review %d; the check: %+v", counts, len(rep.Ignored), len(rep.Review), rep.Check)
 	return t.record(ctx, st, Step{Step: StepReplay, Detail: map[string]any{"report": rep, "outcomes": counts,
-		"alerts_untrusted": untrusted}})
+		"alerts_untrusted": untrusted, "trust_not_used": notUsed}})
 }
 
 // Calls runs the replay's calls in the deployment's network (runCalls with replay-calls).

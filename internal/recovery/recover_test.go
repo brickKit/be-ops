@@ -22,6 +22,11 @@ type fakeProfile struct {
 	recs   map[string][]runprofile.Record
 	fail   bool
 	listed []runprofile.Listed // ListAll of the alert channel: records with their verification as given
+	unused []string            // the trust records the history does not use (P12.25)
+}
+
+func (f *fakeProfile) Trust(context.Context) (*runprofile.TrustHistory, error) {
+	return &runprofile.TrustHistory{Problems: f.unused}, nil
 }
 
 func (f *fakeProfile) Append(_ context.Context, kind string, body any) (runprofile.Record, error) {

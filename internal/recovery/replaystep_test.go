@@ -70,6 +70,7 @@ func TestTheReplayStepRunsTheCallsInTheNetworkAndRecordsTheList(t *testing.T) {
 			Record: runprofile.Record{Body: evidenceBody(t, "e3", "mdm/org", "dave")}},
 		{Key: "a4", Read: true, Record: runprofile.Record{Body: json.RawMessage(`{"other":"alert"}`)}}, // not an intent
 	}
+	prof.unused = []string{"r9: a rotation without both signatures"}
 	phase := ""
 	var in ReplayInput
 	var run []string
@@ -121,6 +122,8 @@ func TestTheReplayStepRunsTheCallsInTheNetworkAndRecordsTheList(t *testing.T) {
 	recs, _, _ := prof.List(ctx, runprofile.KindRecoveryStep)
 	last, _ := Decode(recs[len(recs)-1].Body)
 	assert.Equal(t, map[string]any{"applied": float64(1), "reflected": float64(1)}, last.Detail["outcomes"])
+	assert.Equal(t, []any{"r9: a rotation without both signatures"}, last.Detail["trust_not_used"],
+		"the trust records the history does not use are alerted and recorded (P12.25)")
 
 	// 6.8: new keys in the files the configuration names, a standby named, the old file kept
 	require.NoError(t, tool.Keys(ctx))

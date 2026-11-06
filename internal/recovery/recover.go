@@ -22,6 +22,9 @@ type Profile interface {
 	List(ctx context.Context, kind string) ([]runprofile.Record, []error, error)
 	ListAll(ctx context.Context, kind string) ([]runprofile.Listed, error)
 	Advance(ctx context.Context, kind string, seen ...int64) (int64, error)
+	// Trust is the trust material's history the alert channel's records are judged against (P12.24-P12.26; ListAll
+	// applies it): its Problems are the trust records it does not use, alerted in 6.2.
+	Trust(ctx context.Context) (*runprofile.TrustHistory, error)
 }
 
 // Tool is be-ops recover for one deployment (a BrickKit project).
