@@ -61,6 +61,9 @@ const Usage = `be-ops recover <step> [flags]   (assembly protocol 15, steps 1-10
                                  (the approver confirms the key sets refreshed and an authorization admin can log in)
   open --approver A              step 10: the continuous number series raised past the audit's numbers after T; every
                                  member restarts running; the recovery is over
+  backup-record --finished-at T --backup ID
+                                 not a step: the backup tool's record of a successful backup in the run profile (kind
+                                 backup); archive units release their online rows only after one (be-protocol P15.21)
   Steps 6-10 run their calls in a container on the deployment's network (` + ReplayImage + `, this binary mounted:
   build it with CGO_ENABLED=0).
 
@@ -93,6 +96,8 @@ func Main(args []string, out io.Writer) error {
 	wait := fs.Duration("wait", 5*time.Minute, "how long to wait for the members and the consumers")
 	window := fs.Duration("window", time.Hour, "how far before T the external records are listed (reconcile)")
 	failedAt := fs.String("failed-at", "", "the failure moment, RFC 3339 (reconcile, loss)")
+	finishedAt := fs.String("finished-at", "", "when the backup finished, RFC 3339 (backup-record)")
+	backupID := fs.String("backup", "", "the backup's label (backup-record)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -114,6 +119,12 @@ func Main(args []string, out io.Writer) error {
 		fmt.Fprintf(out, "state: %s\nrecovery: %s\nT: %s\ndone: %s\n", st.State, st.Recovery, st.T.Format(time.RFC3339Nano),
 			strings.Join(st.Done, ", "))
 		return nil
+	case "backup-record": // not a recovery step: the backup tool's record of a successful backup (be-protocol P15.21)
+		at, err := time.Parse(time.RFC3339Nano, *finishedAt)
+		if err != nil {
+			return fmt.Errorf("--finished-at: %w", err)
+		}
+		return t.RecordBackup(ctx, *backupID, at)
 	case StepAnnounce:
 		when, err := time.Parse(time.RFC3339Nano, *at)
 		if err != nil {
