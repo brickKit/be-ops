@@ -3,8 +3,8 @@ module github.com/brickKit/be-ops
 go 1.27.0
 
 require (
-	github.com/brickKit/be-sdk-go/v3 v3.0.0-alpha.119
-	github.com/brickKit/contract-infra-authz/v3 v3.0.0-alpha.5
+	github.com/brickKit/be-sdk-go/v3 v3.0.0-alpha.121
+	github.com/brickKit/contract-infra-authz/v3 v3.0.0-alpha.6
 	github.com/brickKit/infra-audit/contract/v3 v3.0.0-alpha.3
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/stretchr/testify v1.12.1
